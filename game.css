@@ -1,0 +1,506 @@
+/* game.css — 디럭스 청기백기 전용. 색은 daily-ui.css 토큰을 쓴다 */
+
+/* 한글은 Pretendard, 숫자는 Outfit */
+body { font-family: 'Pretendard Variable', Pretendard, 'Inter', system-ui, sans-serif; }
+
+/* 벽지 */
+:root { --wall-a: #fffbf4; --wall-b: #fbf3e6; }
+[data-theme="dark"] { --wall-a: #2a231c; --wall-b: #261f19; }
+
+/* 화면은 보이는 영역에 고정한다 */
+.slide.app-slide {
+  position: fixed;
+  inset: 0;
+  height: auto;
+  padding: calc(16px + env(safe-area-inset-top, 0px)) 16px calc(16px + env(safe-area-inset-bottom, 0px));
+  transition: filter 0.3s ease;
+}
+/* 전기를 내리면 모든 화면이 흑빛 — 색이 빠지고 어두워진다 */
+.slide.app-slide.is-blackout { filter: grayscale(1) brightness(0.36) contrast(1.15); }
+.screen[hidden] { display: none; }
+.landing-card b { font-weight: 700; color: var(--text-given); }
+
+/* ── 게임 화면: 카드가 창 전체를 채운다 ── */
+.slide.app-slide.is-game { padding: 0; }
+.landing-card.is-game {
+  width: 100%;
+  max-width: none;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: calc(8px + env(safe-area-inset-top, 0px)) 10px calc(4px + env(safe-area-inset-bottom, 0px));
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+  background: var(--landing-gradient); /* 불투명하게 — 정전 필터가 뒤 배경까지 어둡게 덮도록 */
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+.landing-card.is-game .screen[data-screen="game"] {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  max-width: 1600px;
+  flex: 1;
+  min-height: 0;
+}
+
+/* ── 머리 줄: 점수 · 최고 · 단계 · 목숨 | 버튼 ── */
+.game-head {
+  flex: none;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  height: 44px;
+  margin-bottom: 8px;
+}
+.game-stat { display: flex; flex-direction: column; align-items: flex-start; gap: 3px; min-width: 0; }
+.game-stat span { font-size: 11px; font-weight: 600; line-height: 1; color: rgba(var(--text-given-rgb), 0.45); }
+.game-stat strong {
+  font-family: 'Outfit', sans-serif;
+  font-size: 26px;
+  font-weight: 700;
+  line-height: 1;
+  color: var(--text-given);
+  font-variant-numeric: tabular-nums;
+}
+.game-stat.is-sub strong { font-size: 18px; font-weight: 600; color: rgba(var(--text-given-rgb), 0.55); }
+.game-stat.is-sub { align-self: flex-end; padding-bottom: 5px; }
+.stage-badge { margin-top: 0; white-space: nowrap; background: var(--playing-bg); color: var(--playing-text); }
+.lives { display: flex; gap: 1px; font-size: 19px; line-height: 1; color: var(--conflict); }
+.lives span { transition: color 0.3s ease, transform 0.3s ease; }
+.lives .is-lost { color: rgba(var(--text-given-rgb), 0.14); transform: scale(0.85); }
+.head-actions { margin-left: auto; display: flex; gap: 8px; }
+
+.icon-btn {
+  min-width: 40px;
+  height: 40px;
+  padding: 0 10px;
+  border: none;
+  border-radius: 14px;
+  background: var(--surface-1);
+  color: rgba(var(--text-given-rgb), 0.7);
+  font-family: 'Outfit', sans-serif;
+  font-size: 18px;
+  font-weight: 700;
+  cursor: pointer;
+  box-shadow: 0 2px 6px rgba(var(--shadow-rgb), 0.08);
+  transition: transform 0.08s ease, background 0.15s ease, box-shadow 0.15s ease;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.icon-btn:hover { background: var(--surface-1-hover); color: var(--text-given); box-shadow: 0 4px 10px rgba(var(--shadow-rgb), 0.14); }
+.icon-btn:active { transform: scale(0.95); }
+.back-inline { font-family: 'Pretendard Variable', Pretendard, sans-serif; font-size: 13px; font-weight: 600; white-space: nowrap; }
+
+.sound-btn { display: inline-flex; align-items: center; justify-content: center; gap: 4px; }
+.sound-svg { display: block; width: 20px; height: 20px; flex: none; }
+.landing-mini-btn.sound-btn .sound-svg { width: 16px; height: 16px; }
+.sound-btn.is-off { color: rgba(var(--text-given-rgb), 0.4); }
+
+/* ── 벽 (무대) ── */
+.stage-wrap {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  border-radius: 22px;
+  overflow: hidden;
+  touch-action: none;
+  background: var(--wall-a);
+  box-shadow: 0 1px 2px rgba(var(--shadow-rgb), 0.06), 0 6px 18px rgba(var(--shadow-rgb), 0.08), inset 0 0 0 1px rgba(var(--shadow-rgb), 0.06);
+}
+.stage {
+  position: absolute;
+  left: 0;
+  top: 0;
+  transform-origin: 0 0;
+  background: repeating-linear-gradient(90deg, var(--wall-a) 0 38px, var(--wall-b) 38px 76px);
+}
+/* 취하면 가장자리가 불그스름하게 일렁인다 */
+.stage-wrap.is-drunk::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: radial-gradient(ellipse at center, transparent 50%, rgba(226, 92, 120, 0.22));
+  animation: drunk-glow 2.6s ease-in-out infinite alternate;
+}
+@keyframes drunk-glow { from { opacity: 0.55; } to { opacity: 1; } }
+
+/* ── 물건 ── */
+.obj, .item { position: absolute; left: 0; top: 0; }
+.obj { z-index: 1; }
+.item { z-index: 3; }
+.item.is-held { z-index: 4; filter: drop-shadow(0 10px 10px rgba(0, 0, 0, 0.25)); }
+[data-hit], .hit { cursor: pointer; }
+.item[data-hit] { cursor: grab; }
+.item.is-held { cursor: grabbing; }
+.o-svg { display: block; width: 100%; height: 100%; overflow: visible; }
+.o-shadow { fill: rgba(var(--shadow-rgb), 0.12); }
+.o-drop { fill: rgba(var(--shadow-rgb), 0.1); }
+
+.obj.is-new .o-svg { animation: pop-in 0.5s cubic-bezier(0.3, 1.6, 0.5, 1); }
+@keyframes pop-in { from { transform: scale(0.4); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+.obj.is-wrong .o-svg { animation: wrong 0.9s ease; }
+@keyframes wrong {
+  0%, 100% { filter: none; }
+  20%, 60% { filter: drop-shadow(0 0 8px rgba(217, 72, 59, 0.95)) drop-shadow(0 0 2px rgba(217, 72, 59, 1)); }
+  40%, 80% { filter: drop-shadow(0 0 3px rgba(217, 72, 59, 0.5)); }
+}
+
+/* 깃발: 회색 네모 받침대 + 막대 + 삼각 천 */
+.holder-plate { fill: rgba(var(--shadow-rgb), 0.12); }
+.holder { fill: #a29c94; stroke: #8a847c; stroke-width: 1; }
+.holder-pin { fill: #6b655e; }
+.pole-line { stroke: #8f7f6a; stroke-width: 4; stroke-linecap: round; }
+.pole-tip { fill: #d4b26a; }
+.flag-cloth { stroke: rgba(0, 0, 0, 0.2); stroke-width: 1.4; stroke-linejoin: round; }
+.flag-shine { fill: rgba(255, 255, 255, 0.22); }
+[data-theme="dark"] .flag-cloth { stroke: rgba(255, 255, 255, 0.38); }
+
+/* 전기 스위치 */
+.sw-plate { fill: #fbf8f2; stroke: rgba(var(--shadow-rgb), 0.25); stroke-width: 1.5; }
+.sw-screw { fill: #c9c1b5; }
+.sw-slot { fill: #d8d0c4; }
+.sw-knob { fill: #fffdf9; stroke: rgba(var(--shadow-rgb), 0.3); stroke-width: 1.2; }
+.sw-shine { fill: rgba(var(--shadow-rgb), 0.1); }
+.sw-lever { transition: transform 0.12s ease; }
+.obj-elec.is-off .sw-lever { transform: translateY(26px); }
+.sw-led { fill: #ffcf4a; transition: fill 0.15s ease; }
+.obj-elec.is-off .sw-led { fill: #8d8780; }
+
+/* 가습기 */
+.hm-body { fill: #eef6f4; stroke: rgba(var(--shadow-rgb), 0.25); stroke-width: 1.5; }
+.hm-tank { fill: #d9edf4; stroke: rgba(var(--shadow-rgb), 0.12); }
+.hm-water { fill: #8fcbe6; }
+.hm-cap { fill: #dfeae8; stroke: rgba(var(--shadow-rgb), 0.2); }
+.hm-nozzle { fill: #c5d5d2; stroke: rgba(var(--shadow-rgb), 0.2); }
+.hm-led { fill: #9b9690; transition: fill 0.15s ease; }
+.obj-humid.is-on .hm-led { fill: #3fcf74; }
+.obj-humid.is-on .o-svg { animation: hum 0.16s linear infinite alternate; }
+@keyframes hum { to { transform: translateY(0.7px); } }
+
+/* 불판 · 접시 */
+.gr-body { fill: #3b3733; }
+.gr-fire { opacity: 0.4; transition: opacity 0.5s ease; }
+.obj-meat.is-cooking .gr-fire { opacity: 1; }
+.gr-bar { stroke: #6e6862; stroke-width: 3.2; stroke-linecap: round; }
+.gr-rim { fill: none; stroke: #57524c; stroke-width: 3; }
+.pl-rim { fill: #fdfcfa; stroke: rgba(var(--shadow-rgb), 0.22); stroke-width: 1.5; }
+.pl-in { fill: #f1eee8; }
+
+/* 고기: 속 색이 윗면, 테두리 색이 밑면 */
+.item-meat { width: 62px; height: 42px; }
+.meat-g { transform-box: fill-box; transform-origin: center; }
+.meat-body { stroke-width: 5; stroke-linejoin: round; }
+.meat-fat { fill: none; stroke: rgba(255, 240, 228, 0.7); stroke-width: 3; stroke-linecap: round; }
+.meat-fat.thin { stroke-width: 2; }
+.meat-marks line { stroke: rgba(40, 20, 10, 0.55); stroke-width: 3; stroke-linecap: round; }
+
+/* 술상 */
+.glass { fill: rgba(220, 236, 246, 0.28); stroke: rgba(var(--shadow-rgb), 0.38); stroke-width: 1.6; stroke-linejoin: round; }
+.glass-shine { stroke: rgba(255, 255, 255, 0.6); stroke-width: 2.4; stroke-linecap: round; fill: none; }
+.water-liq { fill: #78bde6; opacity: 0.75; }
+.shot-liq { fill: #cfe7f5; }
+.hit { transform-box: fill-box; transform-origin: center bottom; }
+.hit.is-nope { animation: nope 0.35s ease; }
+@keyframes nope {
+  20% { transform: translateX(-4px) rotate(-3deg); }
+  40% { transform: translateX(4px) rotate(3deg); }
+  60% { transform: translateX(-3px); }
+  80% { transform: translateX(2px); }
+}
+.item-bottle { width: 30px; height: 86px; transform-origin: 15px 43px; }
+.bt-body { fill: #4bab78; fill-opacity: 0.92; stroke: #2f7d52; stroke-width: 1.6; }
+.bt-cap { fill: #2f7d52; }
+.bt-label { fill: #f7f3ea; }
+.bt-text { font-family: 'Pretendard Variable', Pretendard, sans-serif; font-size: 14px; font-weight: 800; fill: #2f7d52; text-anchor: middle; }
+.bt-shine { stroke: rgba(255, 255, 255, 0.45); stroke-width: 3; stroke-linecap: round; fill: none; }
+.stream {
+  position: absolute;
+  left: 0;
+  top: 0;
+  z-index: 3;
+  width: 4px;
+  display: none;
+  border-radius: 2px;
+  background: linear-gradient(rgba(205, 232, 248, 0.6), rgba(205, 232, 248, 0.95));
+  pointer-events: none;
+}
+
+/* 고기가 익는 순간 반짝 · 양면 다 익으면 금빛 */
+.item-meat.is-flash { animation: meat-flash 0.6s ease-out; }
+@keyframes meat-flash {
+  0% { filter: brightness(1); }
+  25% { filter: brightness(1.9) drop-shadow(0 0 10px rgba(255, 214, 90, 1)); }
+  100% { filter: brightness(1); }
+}
+.item-meat.is-ready .o-svg { animation: meat-ready 0.9s ease-in-out infinite alternate; }
+@keyframes meat-ready {
+  from { filter: drop-shadow(0 0 3px rgba(255, 205, 70, 0.7)); }
+  to { filter: drop-shadow(0 0 9px rgba(255, 215, 80, 1)) drop-shadow(0 0 2px rgba(255, 240, 180, 1)); }
+}
+.fx-layer { position: absolute; left: 0; top: 0; z-index: 5; pointer-events: none; }
+.spark {
+  position: absolute;
+  width: 16px;
+  height: 16px;
+  margin: -8px 0 0 -8px;
+  background: #ffd54a;
+  clip-path: polygon(50% 0, 61% 39%, 100% 50%, 61% 61%, 50% 100%, 39% 61%, 0 50%, 39% 39%);
+  opacity: 0;
+  animation: spark 0.75s ease-out forwards;
+}
+.spark.is-dot { width: 8px; height: 8px; margin: -4px 0 0 -4px; clip-path: none; border-radius: 50%; background: #fff6cf; }
+@keyframes spark {
+  0% { opacity: 1; transform: translate(0, 0) scale(0.3) rotate(0deg); }
+  60% { opacity: 1; }
+  100% { opacity: 0; transform: translate(var(--dx), var(--dy)) scale(1.1) rotate(90deg); }
+}
+.spark-ring {
+  position: absolute;
+  width: 24px;
+  height: 24px;
+  margin: -12px 0 0 -12px;
+  border: 3px solid rgba(255, 214, 90, 0.95);
+  border-radius: 50%;
+  animation: spark-ring 0.6s ease-out forwards;
+}
+@keyframes spark-ring { from { opacity: 1; transform: scale(0.4); } to { opacity: 0; transform: scale(4); } }
+
+/* 고기 연기 */
+.smoke-layer { position: absolute; left: 0; top: 0; z-index: 2; pointer-events: none; }
+.smoke {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(226, 221, 214, 0.9), rgba(226, 221, 214, 0) 70%);
+  opacity: 0;
+}
+.smoke.dark { background: radial-gradient(circle, rgba(64, 56, 50, 0.9), rgba(64, 56, 50, 0) 70%); }
+
+/* 수증기: 카드 전체 위 (자막 줄만 그 위) */
+.vapor-layer { position: absolute; inset: 0; z-index: 5; pointer-events: none; overflow: hidden; border-radius: inherit; }
+.vapor-layer[hidden] { display: none; }
+.puff {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 120px;
+  height: 120px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(252, 252, 252, 0.95) 0%, rgba(246, 247, 248, 0.7) 30%, rgba(240, 242, 244, 0.25) 52%, rgba(238, 241, 243, 0) 70%);
+  opacity: 0;
+  will-change: transform, opacity;
+}
+
+/* ── 판정 표시 · 안내 ── */
+.mark {
+  position: absolute;
+  z-index: 8;
+  left: 50%;
+  top: 14px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: calc(100% - 24px);
+  padding: 5px 14px 5px 6px;
+  border-radius: 999px;
+  background: var(--surface-solid);
+  box-shadow: 0 6px 18px rgba(var(--shadow-rgb), 0.2);
+  color: var(--text-given);
+  font-size: 14px;
+  font-weight: 700;
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  transform: translateX(-50%);
+}
+.mark-icon {
+  flex: none;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  font-size: 15px;
+}
+.mark-text { overflow: hidden; text-overflow: ellipsis; }
+.mark.is-ok .mark-icon { background: var(--text-input); }
+.mark.is-bad .mark-icon { background: var(--conflict); }
+.mark.is-bad .mark-text { color: var(--conflict); }
+.mark.is-ok { animation: mark-pop 1.5s ease forwards; }
+.mark.is-bad { animation: mark-pop 2.6s ease forwards; }
+@keyframes mark-pop {
+  0% { opacity: 0; transform: translate(-50%, -8px) scale(0.9); }
+  8% { opacity: 1; transform: translate(-50%, 0) scale(1.05); }
+  16% { transform: translate(-50%, 0) scale(1); }
+  82% { opacity: 1; transform: translate(-50%, 0); }
+  100% { opacity: 0; transform: translate(-50%, -4px); }
+}
+
+.toast {
+  position: absolute;
+  z-index: 8;
+  left: 50%;
+  bottom: 12px;
+  max-width: calc(100% - 24px);
+  padding: 8px 14px;
+  border-radius: 12px;
+  background: var(--playing-bg);
+  color: var(--playing-text);
+  box-shadow: 0 4px 14px rgba(var(--shadow-rgb), 0.14);
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.45;
+  text-align: center;
+  word-break: keep-all;
+  pointer-events: none;
+  opacity: 0;
+  transform: translate(-50%, 8px);
+  transition: opacity 0.25s ease, transform 0.25s ease;
+}
+.toast.is-on { opacity: 1; transform: translate(-50%, 0); }
+
+/* ── 일시정지 · 게임 끝 ── */
+.stage-over {
+  position: absolute;
+  inset: 0;
+  z-index: 9;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  overflow-y: auto;
+  background: rgba(var(--glass-rgb), 0.6);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+}
+.stage-over[hidden] { display: none; }
+.over-panel {
+  margin: auto;
+  width: 100%;
+  max-width: 260px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 20px 16px 16px;
+  border-radius: 16px;
+  background: var(--surface-solid);
+  box-shadow: 0 10px 30px rgba(var(--shadow-rgb), 0.22);
+  text-align: center;
+}
+.over-title { margin: 0; font-size: 12px; font-weight: 700; color: rgba(var(--text-given-rgb), 0.55); }
+.over-score {
+  font-family: 'Outfit', 'Inter', sans-serif;
+  font-size: 34px;
+  font-weight: 700;
+  line-height: 1.1;
+  color: var(--text-given);
+  font-variant-numeric: tabular-nums;
+}
+.over-panel .daily-card-status { margin-top: 0; }
+.over-panel .landing-row { width: 100%; margin-top: 6px; }
+.over-panel .primary-btn { flex: 1; margin-top: 0; height: 42px; }
+.over-panel .small-btn { flex: none; width: 64px; height: 42px; font-size: 14px; }
+
+/* ── 하단 자막 ── */
+.caption-bar {
+  position: relative;
+  z-index: 6;
+  flex: none;
+  width: 100%;
+  height: 84px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+}
+.timer {
+  width: min(360px, 70%);
+  height: 6px;
+  border-radius: 999px;
+  background: var(--surface-1);
+  overflow: hidden;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+.timer.is-on { opacity: 1; }
+.timer span { display: block; height: 100%; border-radius: inherit; background: var(--text-input); transform-origin: left center; }
+.timer.is-low span { background: var(--conflict); }
+.caption {
+  margin: 0;
+  max-width: 100%;
+  min-height: 1.3em;
+  padding: 8px 20px;
+  border-radius: 14px;
+  background: rgba(30, 24, 18, 0.84);
+  color: #fff8ee;
+  font-size: clamp(19px, 3.4vw, 28px);
+  font-weight: 800;
+  line-height: 1.3;
+  letter-spacing: -0.01em;
+  text-align: center;
+  word-break: keep-all;
+  opacity: 0;
+  transform: translateY(6px);
+  transition: opacity 0.22s ease, transform 0.22s ease;
+}
+.caption.is-on { opacity: 1; transform: none; }
+.cap-off { color: transparent; }
+
+/* ── 홈 ── */
+.flag-strip { display: flex; justify-content: center; gap: 2px; height: 46px; }
+.flag-strip svg { width: 28px; height: 46px; }
+.stage-pick { display: flex; flex-direction: column; gap: 8px; }
+.stage-chips { display: flex; justify-content: center; gap: 5px; }
+.stage-chip { border: none; padding: 0; font: inherit; font-family: 'Outfit', 'Inter', sans-serif; font-size: 13px; font-weight: 800; cursor: pointer; }
+.stage-chip.is-sel { background: var(--text-input); color: #fff; }
+.stage-chip:disabled { opacity: 0.35; cursor: default; }
+.stage-name { margin: 0; font-size: 12px; color: rgba(var(--text-given-rgb), 0.55); word-break: keep-all; }
+
+.help-pop {
+  left: 16px;
+  right: 16px;
+  top: 50%;
+  z-index: 20;
+  transform: translateY(-50%);
+  max-height: calc(100% - 32px);
+  overflow-y: auto;
+  padding: 14px 16px;
+  text-align: left;
+}
+.help-pop ul { margin: 8px 0 0; padding-left: 18px; font-size: 12px; line-height: 1.6; color: rgba(var(--text-given-rgb), 0.7); word-break: keep-all; }
+.help-pop li + li { margin-top: 3px; }
+
+/* ── 좁은 화면 ── */
+@media (max-width: 560px) {
+  .game-head { gap: 10px; }
+  .game-stat.is-sub { display: none; }
+  .back-word { display: none; }
+  .stage-badge { font-size: 11px; padding: 3px 8px; }
+  .lives { font-size: 16px; }
+  .head-actions { gap: 6px; }
+  .icon-btn { min-width: 36px; height: 36px; padding: 0 8px; border-radius: 12px; }
+  .caption-bar { height: 76px; }
+}
+@media (max-width: 380px) {
+  .game-stat strong { font-size: 22px; }
+  .stage-badge { max-width: 92px; overflow: hidden; text-overflow: ellipsis; }
+}
+@media (max-height: 520px) {
+  .caption-bar { height: 70px; gap: 6px; }
+  .caption { padding: 5px 14px; font-size: 18px; }
+  .game-head { margin-bottom: 6px; }
+}
