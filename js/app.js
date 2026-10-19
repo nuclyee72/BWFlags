@@ -4,7 +4,7 @@ window.BW = window.BW || {};
   const $ = (s) => document.querySelector(s);
   const slide = $('#app');
   const card = $('#card');
-  let startStage = 0;
+  let lesson = 0;
 
   function show(name) {
     document.querySelectorAll('.screen').forEach((s) => { s.hidden = s.dataset.screen !== name; });
@@ -20,29 +20,29 @@ window.BW = window.BW || {};
     $('#home-strip').innerHTML = keys.map((k, i) => BW.obj.svg.flag(k, i % 2 ? 180 : 0)).join('');
   }
 
+  // 홈: 도전 기록 · 튜토리얼 진행. 칩으로 튜토리얼 단계를 고른다 (처음엔 아직 안 끝낸 첫 단계)
   function renderHome() {
     const s = BW.store.stats();
-    const played = s.games > 0 || s.bestStage > 0;
+    const done = BW.store.lessons();
+    const L = BW.LESSONS;
     $('#stat-best').textContent = s.best;
-    $('#stat-stage').textContent = played ? s.bestStage + 1 : '-';
     $('#stat-games').textContent = s.games;
-
-    // 도달해 본 단계까지는 골라서 바로 시작할 수 있다
-    const maxStart = Math.min(s.bestStage || 0, BW.STAGES.length - 1);
-    startStage = Math.min(BW.store.startStage(), maxStart);
+    $('#stat-tut').textContent = `${done.length}/${L.length}`;
+    const firstTodo = L.findIndex((_, i) => !done.includes(i));
+    const picked = BW.store.pickedLesson();
+    lesson = picked != null && picked < L.length ? picked : firstTodo < 0 ? 0 : firstTodo;
     const chips = $('#stage-chips');
     chips.innerHTML = '';
-    BW.STAGES.forEach((st, i) => {
+    L.forEach((st, i) => {
       const b = document.createElement('button');
       b.type = 'button';
-      b.className = 'chip stage-chip' + (i === startStage ? ' is-sel' : '');
+      b.className = 'chip stage-chip' + (i === lesson ? ' is-sel' : '') + (done.includes(i) ? ' is-done' : '');
       b.textContent = i + 1;
       b.title = `${i + 1}단계 · ${st.name}`;
-      b.disabled = i > maxStart;
-      b.addEventListener('click', () => { BW.store.setStartStage(i); renderHome(); });
+      b.addEventListener('click', () => { BW.store.setPickedLesson(i); renderHome(); });
       chips.appendChild(b);
     });
-    $('#stage-name').textContent = `${startStage + 1}단계 · ${BW.STAGES[startStage].name}`;
+    $('#stage-name').textContent = `${lesson + 1}단계 · ${L[lesson].name}`;
     renderVoiceNote();
   }
   function renderVoiceNote() {
@@ -73,19 +73,20 @@ window.BW = window.BW || {};
   BW.speech.onVoices(renderVoiceNote);
 
   // ── 버튼 ──
-  function play() {
+  function play(mode) {
     BW.sound.unlock();
     BW.speech.unlock();
     show('game');
-    BW.game.start(startStage);
+    BW.game.start(mode, lesson);
   }
   function goHome() {
     BW.game.stop();
     show('home');
     renderHome();
   }
-  $('#play-btn').addEventListener('click', play);
-  $('#again-btn').addEventListener('click', play);
+  $('#play-btn').addEventListener('click', () => play('challenge'));
+  $('#tutorial-btn').addEventListener('click', () => play('tutorial'));
+  $('#again-btn').addEventListener('click', () => BW.game.primary()); // 다시 하기 · 다음 단계 · 도전 시작
   $('#game-back-btn').addEventListener('click', goHome);
   $('#over-home-btn').addEventListener('click', goHome);
   $('#pause-home-btn').addEventListener('click', goHome);

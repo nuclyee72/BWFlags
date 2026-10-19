@@ -370,6 +370,19 @@ body { font-family: 'Pretendard Variable', Pretendard, 'Inter', system-ui, sans-
   transition: opacity 0.25s ease, transform 0.25s ease;
 }
 .toast.is-on { opacity: 1; transform: translate(-50%, 0); }
+/* 튜토리얼 방법 안내 — 조금 크게, 연습 내내 떠 있다 */
+.toast.is-guide { font-size: 15px; padding: 10px 18px; max-width: min(640px, calc(100% - 24px)); }
+
+/* 튜토리얼: 점수 · 목숨 없음 */
+.screen.is-tutorial .game-stat, .screen.is-tutorial .lives { display: none; }
+/* 튜토리얼 힌트: 해야 할 물건은 초록, 명령에 없는데 건드린 물건은 빨강 */
+.obj.is-target .o-svg { animation: target-glow 1s ease-in-out infinite alternate; }
+@keyframes target-glow {
+  from { filter: drop-shadow(0 0 2px rgba(75, 143, 74, 0.5)); }
+  to { filter: drop-shadow(0 0 10px rgba(75, 160, 74, 1)); }
+}
+.obj.is-stray .o-svg { filter: drop-shadow(0 0 7px rgba(217, 72, 59, 0.95)); }
+.mark.is-icon { padding-right: 6px; }
 
 /* ── 일시정지 · 게임 끝 ── */
 .stage-over {
@@ -466,7 +479,9 @@ body { font-family: 'Pretendard Variable', Pretendard, 'Inter', system-ui, sans-
 .stage-pick { display: flex; flex-direction: column; gap: 8px; }
 .stage-chips { display: flex; justify-content: center; gap: 5px; }
 .stage-chip { border: none; padding: 0; font: inherit; font-family: 'Outfit', 'Inter', sans-serif; font-size: 13px; font-weight: 800; cursor: pointer; }
+.stage-chip.is-done { background: var(--cell-selected); color: var(--text-sel); }
 .stage-chip.is-sel { background: var(--text-input); color: #fff; }
+.home-row .landing-btn { flex: 1; height: 50px; margin-top: 0; }
 .stage-chip:disabled { opacity: 0.35; cursor: default; }
 .stage-name { margin: 0; font-size: 12px; color: rgba(var(--text-given-rgb), 0.55); word-break: keep-all; }
 

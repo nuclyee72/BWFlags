@@ -26,17 +26,20 @@
         <div class="landing-stack">
           <div class="flag-strip" id="home-strip" aria-hidden="true"></div>
           <div class="stats-numbers">
-            <div class="stats-num"><strong id="stat-best">0</strong><span>최고 점수</span></div>
-            <div class="stats-num"><strong id="stat-stage">-</strong><span>최고 단계</span></div>
-            <div class="stats-num"><strong id="stat-games">0</strong><span>판 수</span></div>
+            <div class="stats-num"><strong id="stat-best">0</strong><span>도전 최고 점수</span></div>
+            <div class="stats-num"><strong id="stat-games">0</strong><span>도전 판 수</span></div>
+            <div class="stats-num"><strong id="stat-tut">0/7</strong><span>튜토리얼</span></div>
           </div>
           <div class="stage-pick">
-            <p class="section-title">시작 단계</p>
+            <p class="section-title">튜토리얼</p>
             <div class="stage-chips" id="stage-chips"></div>
             <p class="stage-name" id="stage-name"></p>
           </div>
           <p class="note" id="voice-note" hidden>한국어 음성 없음 · 자막만</p>
-          <button class="landing-btn primary-btn" type="button" id="play-btn">시작</button>
+          <div class="landing-row home-row">
+            <button class="landing-btn" type="button" id="tutorial-btn">튜토리얼</button>
+            <button class="landing-btn primary-btn" type="button" id="play-btn">도전</button>
+          </div>
           <div class="landing-mini-actions">
             <button class="landing-mini-btn" type="button" id="help-btn">게임 방법</button>
             <button class="landing-mini-btn" type="button" id="dark-toggle">다크 모드</button>
@@ -78,7 +81,7 @@
 
           <div class="stage-over" id="over" hidden>
             <div class="over-panel">
-              <p class="over-title">게임 끝</p>
+              <p class="over-title" id="over-title">게임 끝</p>
               <strong class="over-score" id="over-score">0</strong>
               <span class="daily-card-status" id="over-badge">최고 0</span>
               <p class="note" id="over-stage"></p>
@@ -103,16 +106,18 @@
       <div class="popover help-pop" id="help-pop" hidden>
         <p class="section-title">게임 방법</p>
         <ul>
-          <li>유예 시간(명령 끝부터): 깃발 1.5초 · 전기·습기 1.4초 · 고기 2.8초 · 취기 올려 4.6초 / 내려 1.9초 · 위치 명령 +0.3초 · 말고 +0.35초 · 여러 개짜리는 모두 더함</li>
-          <li>명령 없이 건드리면 실패</li>
+          <li><b>튜토리얼</b> 1~7단계 · 방법 안내 · 시간 제한 · 점수 · 목숨 없음</li>
+          <li><b>도전</b> 점수 · 목숨 3 · 물건 최대 7개(같은 색 깃발 2개까지) · 명령 3번마다 물건을 새로 뽑고 자리 섞기</li>
+          <li><b>유예 시간</b>(명령 끝부터) 깃발 1.5초 · 전기·습기 1.4초 · 고기 2.8초 · 취기 올려 4.6초 / 내려 1.9초 · 위치·왼쪽/오른쪽 +0.3초 · 전부 +0.9초 · 말고 +0.35초 · 여러 개짜리는 모두 더함</li>
+          <li>이번 명령 중 명령 없이 건드리면 실패</li>
           <li><b>깃발</b> 회전 0.26초 · 끝까지 돌아야 판정</li>
+          <li><b>같은 색</b> "청기 전부" · "왼쪽 청기" · "오른쪽 청기"</li>
           <li><b>말고</b> "A 올리지 말고 B 내려" → A 그대로</li>
           <li><b>위치</b> 양쪽에서 네 번째까지 · 깃발 외 물건 포함</li>
-          <li><b>자리</b> 명령 3번마다 섞기</li>
           <li><b>고기</b> 한 면 5초 익음 · 10초 탐 · 속 색 윗면, 테두리 색 밑면 · 양면 익으면 명령 없이 내리기 +300</li>
           <li><b>취기</b> 술 따르기 0.9초 · 물은 내려 명령 때만</li>
-          <li><b>단계</b> 6번 성공마다 · 7단계 뒤 6번마다 속도 업</li>
-          <li><b>점수</b> 100~160(빠를수록) × 연속 +10%씩(최대 +100%) · 목숨 3</li>
+          <li><b>레벨</b> 6번 성공마다 · 빨라지고 유예 시간 5%씩 줄어듦(최소 55%)</li>
+          <li><b>점수</b> 100~160(빠를수록) × 연속 +10%씩(최대 +100%)</li>
         </ul>
       </div>
     </section>

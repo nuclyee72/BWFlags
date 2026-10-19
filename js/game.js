@@ -1,39 +1,69 @@
 // game.js — 디럭스 청기백기 본체: 물건 · 명령 · 판정 · 효과
 //
-// 흐름: 명령을 만든다 → 읽어 준다(자막) → 다 읽은 순간부터 유예 시간을 잰다
-//       → 모든 물건이 '기대 상태'와 같아지면 성공, 시간이 다 되면 실패
-// 기대 상태 = 직전 판정 뒤의 상태(base) + 이번 명령. 그래서 명령 없이 건드린 것도 틀린다
+// 두 가지 모드
+//  · 튜토리얼(1~7단계): 단계마다 정해진 연습. 방법을 보여 주고, 시간 제한 · 점수 · 목숨이 없다
+//  · 도전: 물건 최대 7개(같은 색 깃발은 2개까지)를 자리 섞을 때마다 새로 뽑는다. 점수 · 목숨 · 시간 제한
+//
+// 명령 한 번의 흐름: 지금 상태를 기준(base)으로 잡는다 → 읽어 준다(자막) → 다 읽은 순간 기대 상태를 정한다
+//   → 모든 물건이 기대 상태와 같아지면 성공 (도전은 유예 시간이 지나면 실패)
+// 기대 상태 = 명령 시작 때의 상태 + 이번 명령. 그래서 이번 명령 중에 명령 없이 건드린 것만 틀린다
+// (이전 명령에 늦게 반응한 건 다음 명령 시작 때 기준에 흡수된다)
 window.BW = window.BW || {};
 (function (BW) {
   const { FLAGS, NAMES, SLOT, PIVOT, MEAT, DRINK, svg } = BW.obj;
 
   const LIVES = 3;
-  const STAGE_CLEARS = 6;          // 이만큼 맞히면 다음 단계
-  const SHUFFLE_EVERY = 3;         // 이만큼 명령하면 물건 자리를 섞는다
+  const LEVEL_CLEARS = 6;          // 도전: 이만큼 맞힐 때마다 레벨 업(빨라진다)
+  const SHUFFLE_EVERY = 3;         // 도전: 이만큼 명령하면 물건을 새로 뽑고 자리를 섞는다
+  const MAX_OBJECTS = 7;
   const COOK_SEC = 5;              // 한 면이 이만큼 구워지면 익고(1.0) 두 배면 탄다(2.0)
   const ROT_SPEED = 180 / 260;     // 깃발 막대 회전 속도 (도/ms) — 반 바퀴 0.26초
   const FLIP_MS = 240;
-  // 한 줄 배치: 물건이 가장 많을 때(8칸) 줄이 판 폭의 ROW_FILL, 높이는 판의 H_FILL을 넘지 않는다
+  // 한 줄 배치: 8칸짜리 줄이 판 폭의 ROW_FILL이 되는 크기로 고정 (물건 수가 바뀌어도 크기 그대로)
   const SLOT_GAP = 14, N_REF = 8, ROW_FILL = 0.84, H_FILL = 0.4;
-  const FLAG_KEYS = ['blue', 'white', 'red', 'black'];
+  const COLORS = ['blue', 'white', 'red', 'black'];
   const SPECIAL = ['elec', 'humid', 'meat', 'drunk'];
-  const ORD = ['가장', '두', '세', '네', '다섯', '여섯', '일곱', '여덟'];
-  // 다 읽고 난 뒤 주어지는 시간(ms) — 위치로 부르면 조금 더, 속도가 오르면 줄어든다
+  const ORD = ['가장', '두', '세', '네'];
+  // 다 읽고 난 뒤 주어지는 시간(ms). 할 일마다 더한다. 위치 · 왼쪽/오른쪽으로 부르면 +0.3초
   const GRACE = { flag: 1500, elec: 1400, humid: 1400, meat: 2800, drunkup: 4600, drunkdown: 1900 };
-  const POS_EXTRA = 300;
+  const POS_EXTRA = 300, ALL_EXTRA = 900, NEG_EXTRA = 350;
 
-  const STAGES = [
-    { name: '청기 · 백기', add: ['blue', 'white'], say: '청기 백기, 시작!' },
-    { name: '적기 · 흑기', add: ['red', 'black'], say: '적기, 흑기 등장!', hint: '명령 3번마다 자리 섞기' },
-    { name: '위치 명령', pos: true, say: '이제 위치로도 불러요!', hint: '양쪽에서 네 번째까지' },
-    { name: '전기', add: ['elec'], say: '전기 등장!' },
-    { name: '습기', add: ['humid'], say: '습기 등장!' },
-    { name: '고기', add: ['meat'], say: '고기 등장!', hint: '한 면 5초 익음 · 10초 탐' },
-    { name: '취기', add: ['drunk'], say: '취기 등장!', hint: '물은 내려 명령 때만' },
+  // 튜토리얼 단계: 물건 구성과 연습 순서
+  const LESSONS = [
+    { name: '청기 · 백기', say: '청기 백기', roster: ['blue', 'white'], steps: ['flip', 'flip', 'flip', 'noop', 'flip'] },
+    { name: '적기 · 흑기 · 말고', say: '적기 흑기, 그리고 말고', roster: ['blue', 'white', 'red', 'black'], steps: ['flip', 'flip', 'neg', 'noop', 'neg', 'neg'] },
+    { name: '위치 · 같은 색', say: '위치와 같은 색', roster: ['blue', 'blue2', 'white', 'red', 'black'], steps: ['pos', 'pos', 'side', 'side', 'all', 'multi2'] },
+    { name: '전기', say: '전기', roster: ['blue', 'white', 'red', 'black', 'elec'], steps: ['elec:down', 'flip', 'shuffle', 'elec:down', 'elec:up', 'multi2'] },
+    { name: '습기', say: '습기', roster: ['blue', 'white', 'red', 'elec', 'humid'], steps: ['humid:up', 'flip', 'humid:down', 'multi3'] },
+    { name: '고기', say: '고기', roster: ['blue', 'white', 'red', 'elec', 'meat'], steps: ['meat:up', 'cook', 'meat:up', 'flip', 'meat:down'] },
+    { name: '취기', say: '취기', roster: ['blue', 'white', 'red', 'elec', 'humid', 'meat', 'drunk'], steps: ['drunk:up', 'flip', 'pos', 'drunk:down'] },
   ];
-  BW.STAGES = STAGES;
+  BW.LESSONS = LESSONS;
+  // 튜토리얼에서 보여 주는 방법
+  const HOW = {
+    flip: '깃발을 누르면 받침대를 축으로 돌아요 · 끝까지 돌아야 올림/내림',
+    noop: '이미 명령대로예요 · 아무것도 건드리지 말고 기다려요',
+    neg: "'말고' 앞의 물건은 그대로 두고, 뒤의 명령만 해요",
+    pos: '끝에서부터 세요 · 깃발이 아닌 물건도 세요 (네 번째까지)',
+    side: "같은 색이 둘이면 '왼쪽 청기' · '오른쪽 청기'로 불러요",
+    all: "'청기 전부'는 청기 두 개 모두예요",
+    multi: '명령이 여러 개면 전부 해요',
+    'elec:down': '스위치를 눌러 전기를 내려요 · 화면이 깜깜해져요',
+    'elec:up': '스위치를 눌러 전기를 올려요',
+    shuffle: '자리가 바뀌면 전기는 저절로 켜져요',
+    'humid:up': '가습기를 눌러 켜요 · 수증기가 화면을 가려요',
+    'humid:down': '가습기를 눌러 꺼요',
+    'meat:up': '접시의 고기를 끌어 위쪽 불판에 올려요',
+    cook: '고기를 눌러 뒤집어요 · 한 면이 익으면 반짝 · 양면이 익어 금빛이 되면 접시로 끌어 내려요 · 한 면 10초면 타요',
+    cookAgain: '고기를 다시 불판에 올려 양면을 익혀요',
+    'meat:down': '내려 명령이면 덜 익었어도 접시로 끌어 내려요',
+    'drunk:up': '술병을 끌어 술잔 위에 대면 따라져요 · 다 차면 술잔을 눌러 마셔요',
+    'drunk:down': '물잔을 눌러 마셔요 · 물은 내려 명령 때만 마실 수 있어요',
+    stray: '명령에 없는 물건은 원래대로 돌려 놓아요',
+  };
 
   const rand = Math.random;
+  const pick = (a) => a[Math.floor(rand() * a.length)];
   const flip = (d) => (d === 'up' ? 'down' : 'up');
   const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -42,6 +72,11 @@ window.BW = window.BW || {};
     for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(rand() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; }
     return a;
   }
+
+  // 깃발 키: 색 이름, 같은 색 두 번째는 뒤에 2 (blue, blue2)
+  const colorOf = (k) => k.replace(/2$/, '');
+  const isFlag = (k) => !!FLAGS[colorOf(k)];
+  const kindOf = (k) => (isFlag(k) ? 'flag' : k);
 
   // 고기 색: 날것 → 익음(1) → 탐(2)
   const hex = (h) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16));
@@ -52,16 +87,19 @@ window.BW = window.BW || {};
   const G = { alive: false, token: 0, phase: 'idle', raf: 0 };
   let bodies = {};   // 키 → 몸체 { el, x, y, w, h, hx, hy(제자리), vx, vy, fixed }
   let el = null;
+  const tutorial = () => G.mode === 'tutorial';
 
   // ── 준비 ──
   function init() {
     const q = (id) => document.getElementById(id);
     el = {
-      app: q('app'), card: q('card'), wrap: q('stage-wrap'), stage: q('stage'), vapor: q('vapor'),
+      app: q('app'), card: q('card'), screen: document.querySelector('[data-screen="game"]'),
+      wrap: q('stage-wrap'), stage: q('stage'), vapor: q('vapor'),
       score: q('score'), best: q('best'), badge: q('stage-badge'), lives: q('lives'),
       timer: q('timer'), timerFill: q('timer-fill'), caption: q('caption'),
       mark: q('mark'), markIcon: q('mark-icon'), markText: q('mark-text'), toast: q('toast'),
-      pause: q('pause'), over: q('over'), overScore: q('over-score'), overBadge: q('over-badge'), overStage: q('over-stage'),
+      pause: q('pause'), over: q('over'), overTitle: q('over-title'), overScore: q('over-score'),
+      overBadge: q('over-badge'), overStage: q('over-stage'), again: q('again-btn'),
     };
     BW.caption.bind(el.caption);
     el.wrap.addEventListener('pointerdown', onDown);
@@ -74,41 +112,39 @@ window.BW = window.BW || {};
     document.addEventListener('visibilitychange', () => { if (document.hidden) pause(); });
   }
 
-  function start(startStage) {
+  // mode: 'tutorial' | 'challenge', lesson: 튜토리얼 단계(0부터)
+  function start(mode, lesson = 0) {
     if (!el) init();
     stop();
-    startStage = clamp(startStage | 0, 0, STAGES.length - 1);
     Object.assign(G, {
-      alive: true, phase: 'intro', stage: startStage, stageClears: 0, score: 0, lives: LIVES, streak: 0,
-      unlocked: new Set(), posOn: startStage >= 2, flagOrder: [], flags: {},
+      alive: true, mode, phase: 'intro', lesson: clamp(lesson | 0, 0, LESSONS.length - 1), stepIdx: 0,
+      score: 0, lives: LIVES, streak: 0, clears: 0, level: 0,
+      flags: {}, slots: [], sinceShuffle: 0,
       elecOn: true, humidOn: false, drunk: false,
       meat: { loc: 'plate', from: 'plate', held: false, top: 0, bottom: 0, flipT: 0, x: 0, y: 0 },
       bottle: { held: false, x: 0, y: 0, tilt: 0, pouring: false, placed: false }, shot: 0, water: 1,
-      slots: [], sinceShuffle: 0,
       base: {}, expected: null, cmd: null, since: { elec: 0, humid: 0, meat: 0, drunk: 0 }, lastText: '',
-      wobA: 0, wobT: 0, vapor: [], vaporAcc: 0, smoke: [], smokeAcc: 0, drag: null,
+      wobA: 0, wobT: 0, vapor: [], vaporAcc: 0, smoke: [], smokeAcc: 0, drag: null, taskDone: false,
       best: BW.store.stats().best,
     });
-    for (let i = 0; i <= startStage; i++) for (const k of STAGES[i].add || []) G.unlocked.add(k);
-    G.flagOrder = FLAG_KEYS.filter((k) => G.unlocked.has(k));
-    ensureObjects();
-    G.slots = shuffle(Object.keys(bodies));
-    fit();
-    rebase();
+    G.smokeLayer = layer('smoke-layer');
+    G.fxLayer = layer('fx-layer');
+    el.screen.classList.toggle('is-tutorial', tutorial());
+    setRoster(tutorial() ? LESSONS[G.lesson].roster : randomRoster());
     hud();
     el.over.hidden = true;
     el.pause.hidden = true;
     el.vapor.hidden = false;
     G.last = performance.now();
     if (!G.raf) G.raf = requestAnimationFrame(frame);
-    const intro = startStage === 0 ? STAGES[0] : { say: `${startStage + 1}단계부터, 시작!`, hint: STAGES[startStage].hint };
-    runLoop(++G.token, intro);
+    if (tutorial()) runTutorial(++G.token);
+    else runChallenge(++G.token, '도전, 시작!');
   }
 
   // 게임을 접는다 (홈으로 나가거나 새 판 직전)
   function stop() {
     if (!el) return;
-    if (G.alive && G.phase !== 'over') saveStats(false);
+    if (G.alive && G.mode === 'challenge' && G.phase !== 'over') saveStats(false);
     G.alive = false;
     G.token++;
     G.phase = 'idle';
@@ -116,11 +152,13 @@ window.BW = window.BW || {};
     BW.speech.stop();
     BW.caption.hide();
     setTimer(null);
+    guide(null);
     el.app.classList.remove('is-blackout');
     el.wrap.classList.remove('is-drunk');
     clearParticles();
     el.stage.innerHTML = '';
     bodies = {};
+    G.meatEl = G.bottleEl = G.streamEl = null;
     el.mark.className = 'mark';
     el.toast.classList.remove('is-on');
   }
@@ -130,23 +168,27 @@ window.BW = window.BW || {};
     if (finished) s.games++;
     const isBest = G.score > s.best;
     s.best = Math.max(s.best, G.score);
-    s.bestStage = Math.max(s.bestStage || 0, Math.min(G.stage, STAGES.length - 1));
     BW.store.saveStats(s);
     return { s, isBest };
   }
 
-  // ── 물건 만들기 ──
+  // ── 물건 ──
+  function layer(cls) {
+    const d = document.createElement('div');
+    d.className = cls;
+    el.stage.appendChild(d);
+    return d;
+  }
   function addBody(key, kind, html, hit) {
     const d = document.createElement('div');
     d.className = `obj obj-${kind} is-new`;
     if (hit) d.dataset.hit = hit;
     d.innerHTML = html;
-    const s = SLOT;
-    d.style.width = s.w + 'px';
-    d.style.height = s.h + 'px';
+    d.style.width = SLOT.w + 'px';
+    d.style.height = SLOT.h + 'px';
     el.stage.appendChild(d);
     setTimeout(() => d.classList.remove('is-new'), 600);
-    return (bodies[key] = { key, kind, el: d, w: s.w, h: s.h, x: 0, y: 0, hx: 0, hy: 0, vx: 0, vy: 0, sp: 0, th: 0, placed: false, fixed: false });
+    return (bodies[key] = { key, kind, el: d, w: SLOT.w, h: SLOT.h, x: 0, y: 0, hx: 0, hy: 0, vx: 0, vy: 0, sp: 0, th: 0, placed: false, fixed: false });
   }
   function addItem(kind, html, hit) {
     const d = document.createElement('div');
@@ -157,35 +199,34 @@ window.BW = window.BW || {};
     return d;
   }
 
-  function ensureObjects() {
-    if (!G.smokeLayer || !G.smokeLayer.isConnected) {
-      G.smokeLayer = document.createElement('div');
-      G.smokeLayer.className = 'smoke-layer';
-      el.stage.appendChild(G.smokeLayer);
-      G.fxLayer = document.createElement('div');
-      G.fxLayer.className = 'fx-layer';
-      el.stage.appendChild(G.fxLayer);
-    }
-    for (const k of G.flagOrder) {
-      if (bodies[k]) continue;
-      const b = addBody(k, 'flag', svg.flag(k), 'flag:' + k);
+  // 새로 들어온 물건은 기본 상태로: 깃발 내림 · 전기 켜짐 · 가습기 꺼짐 · 고기 접시 · 맨정신
+  function addObject(k) {
+    if (isFlag(k)) {
+      const b = addBody(k, 'flag', svg.flag(colorOf(k)), 'flag:' + k);
       b.pole = b.el.querySelector('.pole');
       G.flags[k] = { angle: 180, target: 180, drawn: 180 };
-    }
-    if (G.unlocked.has('elec') && !bodies.elec) addBody('elec', 'elec', svg.elec(), 'elec');
-    if (G.unlocked.has('humid') && !bodies.humid) addBody('humid', 'humid', svg.humid(), 'humid');
-    if (G.unlocked.has('meat') && !bodies.meat) {
+    } else if (k === 'elec') {
+      addBody('elec', 'elec', svg.elec(), 'elec');
+      G.elecOn = true;
+    } else if (k === 'humid') {
+      addBody('humid', 'humid', svg.humid(), 'humid');
+      G.humidOn = false;
+    } else if (k === 'meat') {
       addBody('meat', 'meat', svg.meatStation());
+      resetMeat();
       G.meatEl = addItem('meat', svg.meat(), 'meat');
       G.meatG = G.meatEl.querySelector('.meat-g');
       G.meatBody = G.meatEl.querySelector('.meat-body');
       G.meatMarks = G.meatEl.querySelector('.meat-marks');
-    }
-    if (G.unlocked.has('drunk') && !bodies.drunk) {
+    } else if (k === 'drunk') {
       const b = addBody('drunk', 'drink', svg.drink());
       b.fixed = true; // 술상은 취해도 제자리
       b.waterLiq = b.el.querySelector('.water-liq');
       b.shotLiq = b.el.querySelector('.shot-liq');
+      G.drunk = false;
+      G.shot = 0;
+      G.water = 1;
+      G.bottle = { held: false, x: 0, y: 0, tilt: 0, pouring: false, placed: false };
       G.bottleEl = addItem('bottle', svg.bottle(), 'bottle');
       G.streamEl = document.createElement('div');
       G.streamEl.className = 'stream';
@@ -193,8 +234,66 @@ window.BW = window.BW || {};
     }
   }
 
+  // 나가는 물건은 남긴 효과까지 거둔다 (정전 · 수증기 · 취기 · 굽던 고기)
+  function removeObject(k) {
+    const b = bodies[k];
+    if (!b) return;
+    if (G.drag && ((G.drag.what === 'meat' && k === 'meat') || (G.drag.what === 'bottle' && k === 'drunk'))) cancelDrag();
+    if (isFlag(k)) delete G.flags[k];
+    else if (k === 'elec') { if (!G.elecOn) setElec(true); }
+    else if (k === 'humid') {
+      G.humidOn = false;
+      for (const p of G.vapor) p.life = Math.min(p.life, p.age + 800);
+    } else if (k === 'meat') {
+      resetMeat();
+      G.meatEl.remove();
+      G.meatEl = null;
+      G.smoke.forEach((p) => p.el.remove());
+      G.smoke = [];
+    } else if (k === 'drunk') {
+      setDrunk(false);
+      G.bottleEl.remove();
+      G.streamEl.remove();
+      G.bottleEl = G.streamEl = null;
+    }
+    b.el.remove();
+    delete bodies[k];
+    delete G.base[k];
+  }
+
+  // 물건 구성을 바꾸고 자리를 섞는다. 남는 물건은 되도록 다른 자리로 간다
+  function setRoster(keys) {
+    for (const k of Object.keys(bodies)) if (!keys.includes(k)) removeObject(k);
+    for (const k of keys) if (!bodies[k]) addObject(k);
+    const before = G.slots;
+    const moved = (o) => o.filter((k, i) => before[i] !== k).length;
+    let next = shuffle(keys.slice());
+    for (let t = 0; t < 24 && moved(next) < Math.max(2, Math.ceil(keys.length * 0.75)); t++) {
+      const cand = shuffle(keys.slice());
+      if (moved(cand) > moved(next)) next = cand;
+    }
+    G.slots = next;
+    G.sinceShuffle = 0;
+    // 자리가 바뀌는 걸 볼 수 있게 전기는 저절로 켜진다
+    if (bodies.elec && !G.elecOn) setElec(true);
+    fit();
+    rebase();
+  }
+
+  // 도전: 6~7개. 특수 물건 2~4개 + 나머지는 깃발(같은 색은 2개까지)
+  function randomRoster() {
+    const n = rand() < 0.5 ? MAX_OBJECTS - 1 : MAX_OBJECTS;
+    const specials = shuffle(SPECIAL.slice()).slice(0, 2 + Math.floor(rand() * 3));
+    const flags = [];
+    while (flags.length < n - specials.length) {
+      const c = pick(COLORS);
+      const cnt = flags.filter((k) => colorOf(k) === c).length;
+      if (cnt < 2) flags.push(cnt ? c + '2' : c);
+    }
+    return flags.concat(specials);
+  }
+
   // ── 배치: 모든 물건이 같은 칸 크기로 한 줄에 선다 (G.slots 순서) ──
-  // 무대 크기는 물건이 가장 많을 때(8칸)를 기준으로 정해서, 물건이 늘어도 크기가 그대로다
   function fit() {
     const cw = el.wrap.clientWidth, ch = el.wrap.clientHeight;
     if (!cw || !ch) return;
@@ -224,7 +323,7 @@ window.BW = window.BW || {};
   // moving: 돌아가는 중인 깃발 · 들고 있는 고기는 올려도 내려도 아니다
   function stateOf(snap) {
     const s = {};
-    for (const k of G.flagOrder) {
+    for (const k in G.flags) {
       const f = G.flags[k];
       const t = f.target === 0 ? 'up' : 'down';
       s[k] = snap || f.angle === f.target ? t : 'moving';
@@ -250,26 +349,69 @@ window.BW = window.BW || {};
     if (G.expected) G.expected[k] = v;
   }
   const commandActive = () => G.cmd && (G.phase === 'speaking' || G.phase === 'waiting');
-  const cmdHas = (key, dir) => commandActive() && G.cmd.parts.some((p) => p.key === key && p.dir === dir && !p.neg);
-  const playable = () => G.alive && G.phase !== 'paused' && G.phase !== 'over' && G.phase !== 'idle';
+  const cmdHas = (key, dir) => commandActive() && G.cmd.parts.some((p) => !p.neg && p.dir === dir && p.keys.includes(key));
+  const playable = () => G.alive && G.phase !== 'paused' && G.phase !== 'over' && G.phase !== 'idle' && G.phase !== 'done';
 
-  // ── 명령 만들기 ──
-  // 위치는 지금 왼쪽부터 늘어선 순서 (깃발이든 다른 물건이든)
+  // ── 부르는 말 ──
+  // ref: { t:'key', key } 이름 · { t:'pos', side, n } 위치 · { t:'side', color, side } 왼쪽/오른쪽 청기 · { t:'all', color } 청기 전부
   const byX = () => Object.keys(bodies).sort((a, b) => bodies[a].x - bodies[b].x);
-  function posKey(side, n) {
-    const o = byX();
-    return side === 'left' ? o[n - 1] : o[o.length - n];
+  const instances = (color) => byX().filter((k) => isFlag(k) && colorOf(k) === color);
+  function keysOf(ref) {
+    if (ref.t === 'key') return bodies[ref.key] ? [ref.key] : [];
+    if (ref.t === 'pos') { const o = byX(); return [ref.side === 'left' ? o[ref.n - 1] : o[o.length - ref.n]].filter(Boolean); }
+    const ks = instances(ref.color);
+    if (ref.t === 'all') return ks;
+    return [ref.side === 'left' ? ks[0] : ks[ks.length - 1]].filter(Boolean);
   }
-  function posNoun(side, n) {
-    const s = side === 'left' ? '왼쪽' : '오른쪽';
-    return n === 1 ? `가장 ${s}` : `${s} ${ORD[n - 1]} 번째`;
+  function nounOf(ref) {
+    const sideWord = (s) => (s === 'left' ? '왼쪽' : '오른쪽');
+    if (ref.t === 'key') return NAMES[isFlag(ref.key) ? colorOf(ref.key) : ref.key];
+    if (ref.t === 'pos') return ref.n === 1 ? `가장 ${sideWord(ref.side)}` : `${sideWord(ref.side)} ${ORD[ref.n - 1]} 번째`;
+    if (ref.t === 'side') return `${sideWord(ref.side)} ${NAMES[ref.color]}`;
+    return `${NAMES[ref.color]} 전부`;
   }
-  const isFlag = (k) => !!FLAGS[k];
-  const kindOf = (k) => (isFlag(k) ? 'flag' : k);
+  // 틀렸을 때 보여 줄 이름: 같은 색이 둘이면 왼쪽/오른쪽을 붙인다
+  function labelOf(k) {
+    if (!isFlag(k)) return NAMES[k];
+    const ks = instances(colorOf(k));
+    if (ks.length < 2) return NAMES[colorOf(k)];
+    return `${ks[0] === k ? '왼쪽' : '오른쪽'} ${NAMES[colorOf(k)]}`;
+  }
+  function posRef(key) {
+    const o = byX(), i = o.indexOf(key);
+    const sides = [];
+    if (i + 1 <= 4) sides.push({ t: 'pos', side: 'left', n: i + 1 });
+    if (o.length - i <= 4) sides.push({ t: 'pos', side: 'right', n: o.length - i });
+    return sides.length ? pick(sides) : null;
+  }
+  // 이름(대부분) · 위치 · 같은 색이면 왼쪽/오른쪽/전부
+  function refFor(key, allowAll) {
+    if (isFlag(key)) {
+      const ks = instances(colorOf(key));
+      if (ks.length > 1) {
+        if (allowAll && rand() < 0.35) return { t: 'all', color: colorOf(key) };
+        if (rand() >= 0.22) return { t: 'side', color: colorOf(key), side: ks[0] === key ? 'left' : 'right' };
+      }
+    }
+    if (rand() < 0.22) { const r = posRef(key); if (r) return r; }
+    if (isFlag(key) && instances(colorOf(key)).length > 1) return { t: 'side', color: colorOf(key), side: instances(colorOf(key))[0] === key ? 'left' : 'right' };
+    return { t: 'key', key };
+  }
+  function makePartFrom(ref, dir, extra) {
+    const keys = keysOf(ref);
+    return Object.assign({ ref, keys, dir, noun: nounOf(ref), kind: kindOf(keys[0]) }, extra);
+  }
+  function compose(parts, extra) {
+    const last = parts.length - 1;
+    const say = (p, i) => (p.neg ? `${p.dir === 'up' ? '내리지' : '올리지'} 말고` : verb(p.dir, i === last));
+    return Object.assign({ parts, text: parts.map((p, i) => `${p.noun} ${say(p, i)}`).join(' ') }, extra);
+  }
 
+  // ── 도전 명령 만들기 ──
   // 무엇을 부를지: 깃발 전체가 3, 특수 물건은 지금 상태에 따라 (켜 둔 지 오래면 끄라고 할 확률이 오른다)
   function keyWeights(withHeavy) {
-    const list = G.flagOrder.map((k) => ({ k, w: 3 / G.flagOrder.length }));
+    const flags = Object.keys(G.flags);
+    const list = flags.map((k) => ({ k, w: 3 / flags.length }));
     const b = G.base, s = G.since;
     if (bodies.elec) list.push({ k: 'elec', w: b.elec === 'up' ? 1.3 : 1.5 + 0.6 * s.elec });
     if (bodies.humid) list.push({ k: 'humid', w: b.humid === 'up' ? 1.5 + 0.6 * s.humid : 1.3 });
@@ -288,42 +430,27 @@ window.BW = window.BW || {};
     for (const x of list) if ((t -= x.w) <= 0) return x;
     return list[list.length - 1];
   }
-  // 고른 물건을 이름(대부분)이나 위치로 부른다. 위치는 어느 쪽에서든 네 번째까지만
-  function describe(key) {
-    if (G.posOn && rand() < 0.22) {
-      const o = byX(), i = o.indexOf(key);
-      const sides = [];
-      if (i + 1 <= 4) sides.push(['left', i + 1]);
-      if (o.length - i <= 4) sides.push(['right', o.length - i]);
-      if (sides.length) {
-        const [side, n] = sides[Math.floor(rand() * sides.length)];
-        return { kind: 'pos', side, n, noun: posNoun(side, n) };
-      }
-    }
-    return { kind: kindOf(key), noun: NAMES[key] };
-  }
   function makePart(withHeavy) {
     const key = weighted(keyWeights(withHeavy)).k;
-    return { ...describe(key), key, dir: dirFor(key) };
+    const ref = refFor(key, true);
+    if (ref.t === 'all') {
+      const st = keysOf(ref).map((k) => G.base[k]);
+      const dir = st.every((v) => v === st[0]) ? (rand() < 0.72 ? flip(st[0]) : st[0]) : pick(['up', 'down']);
+      return makePartFrom(ref, dir);
+    }
+    return makePartFrom(ref, dirFor(key));
   }
   // "청기 올리지 말고 ~": 지금과 반대로 바꾸지 말라는 함정 — 그대로 둬야 맞다
   function makeNegPart() {
     const key = weighted(keyWeights(true)).k;
-    return { ...describe(key), key, dir: G.base[key], neg: true };
+    return makePartFrom(refFor(key, false), G.base[key], { neg: true });
   }
-  function compose(parts) {
-    const last = parts.length - 1;
-    const say = (p, i) => (p.neg ? `${p.dir === 'up' ? '내리지' : '올리지'} 말고` : verb(p.dir, i === last));
-    return { parts, text: parts.map((p, i) => `${p.noun} ${say(p, i)}`).join(' ') };
-  }
-  // 명령 한 줄 = ("A 올리지 말고") + 할 일 1~3개, 모두 합쳐 3개까지
-  //  · 말고: 적기·흑기 단계부터  · 두 개짜리: 위치 명령 단계부터  · 세 개짜리: 전기 단계부터
-  //  · 고기 · 취기는 할 일이 하나일 때만
+  // 명령 한 줄 = ("A 올리지 말고") + 할 일 1~3개, 모두 합쳐 3개까지. 고기 · 취기는 할 일이 하나일 때만
   function genOnce() {
-    const s = G.stage;
-    const p3 = s >= 3 ? Math.min(0.28, 0.12 + 0.03 * (s - 3)) : 0;
-    const p2 = s >= 2 ? Math.min(0.4, 0.22 + 0.03 * (s - 2)) : 0;
-    const pn = s >= 1 ? Math.min(0.42, 0.26 + 0.03 * (s - 1)) : 0;
+    const lv = G.level;
+    const p3 = Math.min(0.28, 0.12 + 0.02 * lv);
+    const p2 = Math.min(0.4, 0.25 + 0.02 * lv);
+    const pn = Math.min(0.42, 0.3 + 0.02 * lv);
     const r = rand();
     let n = r < p3 ? 3 : r < p3 + p2 ? 2 : 1;
     const neg = rand() < pn;
@@ -332,7 +459,7 @@ window.BW = window.BW || {};
     const add = (make) => {
       for (let t = 0; t < 10; t++) {
         const p = make();
-        if (!parts.some((q) => q.key === p.key)) { parts.push(p); return; }
+        if (p.keys.length && !parts.some((q) => q.keys.some((k) => p.keys.includes(k)))) { parts.push(p); return; }
       }
     };
     if (neg) add(makeNegPart);
@@ -348,21 +475,55 @@ window.BW = window.BW || {};
     return c;
   }
 
-  // ── 속도 ──
-  const speedLv = () => Math.max(0, G.stage - (STAGES.length - 1));
-  const ttsRate = () => Math.min(1.6, 1.08 + 0.02 * Math.min(G.stage, STAGES.length - 1) + 0.07 * speedLv());
-  const graceFactor = () => Math.max(0.55, 1 - 0.06 * speedLv());
-  const gapMs = () => Math.max(280, 700 - 50 * speedLv());
+  // ── 튜토리얼 명령 만들기 ──
+  function tutorialCommand(type) {
+    const uniqueFlags = Object.keys(G.flags).filter((k) => instances(colorOf(k)).length === 1);
+    const pickFlag = (avoid = []) => pick(uniqueFlags.filter((k) => !avoid.includes(k)));
+    const named = (k, dir, extra) => makePartFrom({ t: 'key', key: k }, dir, extra);
+    const dup = COLORS.find((c) => instances(c).length > 1);
+    if (type === 'flip') { const k = pickFlag(); return compose([named(k, flip(G.base[k]))], { how: HOW.flip }); }
+    if (type === 'noop') { const k = pickFlag(); return compose([named(k, G.base[k])], { how: HOW.noop, hold: true }); }
+    if (type === 'neg') {
+      const a = pickFlag(), b = pickFlag([a]);
+      return compose([named(a, G.base[a], { neg: true }), named(b, flip(G.base[b]))], { how: HOW.neg });
+    }
+    if (type === 'pos') {
+      const cands = byX().filter((k) => (isFlag(k) || k === 'elec' || k === 'humid') && posRef(k));
+      const k = pick(cands);
+      return compose([makePartFrom(posRef(k), flip(G.base[k]))], { how: HOW.pos });
+    }
+    if (type === 'side') {
+      const side = pick(['left', 'right']);
+      const ref = { t: 'side', color: dup, side };
+      return compose([makePartFrom(ref, flip(G.base[keysOf(ref)[0]]))], { how: HOW.side });
+    }
+    if (type === 'all') {
+      const ref = { t: 'all', color: dup };
+      const st = keysOf(ref).map((k) => G.base[k]);
+      return compose([makePartFrom(ref, st.every((v) => v === 'up') ? 'down' : 'up')], { how: HOW.all });
+    }
+    if (type === 'multi2' || type === 'multi3') {
+      const pool = shuffle(uniqueFlags.concat(['elec', 'humid'].filter((k) => bodies[k])));
+      return compose(pool.slice(0, type === 'multi2' ? 2 : 3).map((k) => named(k, flip(G.base[k]))), { how: HOW.multi });
+    }
+    if (type === 'cook') return { parts: [], text: '고기를 잘 구워서 접시로!', how: HOW.cook, task: 'cook' };
+    const [k, dir] = type.split(':');
+    return compose([named(k, dir)], { how: HOW[type] });
+  }
+
+  // ── 속도 (도전) ──
+  const ttsRate = () => (tutorial() ? 1.0 : Math.min(1.6, 1.12 + 0.05 * G.level));
+  const graceFactor = () => Math.max(0.55, 1 - 0.05 * G.level);
+  const gapMs = () => (tutorial() ? 700 : Math.max(280, 700 - 40 * G.level));
   function graceMs(cmd) {
-    const act = cmd.parts.filter((p) => !p.neg);
-    const each = act.map((p) => {
-      const kind = kindOf(p.key);
-      return GRACE[kind === 'drunk' ? 'drunk' + p.dir : kind] + (p.kind === 'pos' ? POS_EXTRA : 0);
-    });
-    // 할 일마다 시간을 그대로 더한다 → 명령이 길수록 시간이 늘어난다
-    const sum = each.reduce((a, b) => a + b, 0);
-    const negExtra = 350 * (cmd.parts.length - act.length); // "~하지 말고"를 알아듣는 시간
-    return (sum + negExtra) * graceFactor();
+    let sum = 0;
+    for (const p of cmd.parts) {
+      if (p.neg) { sum += NEG_EXTRA; continue; }
+      sum += GRACE[p.kind === 'drunk' ? 'drunk' + p.dir : p.kind];
+      if (p.ref.t === 'pos' || p.ref.t === 'side') sum += POS_EXTRA;
+      if (p.ref.t === 'all') sum += ALL_EXTRA;
+    }
+    return sum * graceFactor(); // 할 일마다 더한다 → 명령이 길수록 시간이 늘어난다
   }
 
   // ── 진행 ──
@@ -371,55 +532,62 @@ window.BW = window.BW || {};
     BW.caption.show(text, ctl);
     return ctl;
   }
-  async function announce(text, hint) {
+  async function announce(text) {
     const t = G.token;
-    if (hint) toast(hint, 5200);
     await speak(text).done;
     if (t !== G.token) return;
-    await sleep(hint ? 900 : 450);
+    await sleep(450);
   }
 
-  async function runLoop(token, intro) {
-    const alive = () => token === G.token && G.alive;
-    if (intro) {
-      G.phase = 'intro';
-      await sleep(400);
-      if (!alive()) return;
-      await announce(intro.say, intro.hint);
+  // 명령 하나를 읽고 판정이 날 때까지 기다린다. 결과(true/false), 중간에 끊기면 null
+  async function playCommand(cmd, token) {
+    rebase(); // 이전 명령 이후 바뀐 건 문제 삼지 않는다
+    G.cmd = cmd;
+    G.expected = null;
+    G.taskDone = false;
+    G.phase = 'speaking';
+    await speak(cmd.text).done;
+    if (token !== G.token || !G.alive) return null;
+    // 위치 · 왼쪽/오른쪽은 다 읽은 순간의 순서로 정한다 (취하면 물건이 떠다닌다)
+    for (const p of cmd.parts) {
+      p.keys = keysOf(p.ref);
+      if (p.neg) p.dir = G.base[p.keys[0]]; // "~하지 말고" = 그대로 둔다
     }
+    if (!cmd.task) {
+      const exp = Object.assign({}, G.base);
+      for (const p of cmd.parts) for (const k of p.keys) exp[k] = p.dir;
+      G.expected = exp;
+    }
+    G.waitStart = performance.now();
+    G.graceTotal = tutorial() ? Infinity : graceMs(cmd);
+    G.deadline = G.waitStart + G.graceTotal;
+    G.phase = 'waiting';
+    return new Promise((r) => { G.resolve = r; });
+  }
+
+  async function runChallenge(token, intro) {
+    const alive = () => token === G.token && G.alive;
+    G.phase = 'intro';
+    await sleep(400);
+    if (!alive()) return;
+    if (intro) await announce(intro);
     while (alive()) {
-      if (G.stageClears >= STAGE_CLEARS) {
+      if (G.sinceShuffle >= SHUFFLE_EVERY) {
         G.phase = 'intro';
-        await sleep(500);
-        if (!alive()) return;
-        await stageUp();
-        if (!alive()) return;
-      } else if (G.sinceShuffle >= SHUFFLE_EVERY && G.slots.length > 2) {
-        G.phase = 'intro';
-        reshuffle();
-        await sleep(1100); // 자리 바뀌는 걸 볼 시간
+        setRoster(randomRoster());
+        BW.sound.shuffle();
+        await sleep(1100); // 바뀐 자리를 볼 시간
         if (!alive()) return;
       }
       G.sinceShuffle++;
-      const cmd = makeCommand();
-      G.cmd = cmd;
-      G.expected = null;
-      G.phase = 'speaking';
-      await speak(cmd.text).done;
-      if (!alive()) return;
-      // 위치 명령은 다 읽은 순간의 깃발 순서로 정한다 (취하면 깃발이 떠다닌다)
-      for (const p of cmd.parts) {
-        if (p.kind === 'pos') p.key = posKey(p.side, p.n);
-        if (p.neg) p.dir = G.base[p.key]; // "~하지 말고" = 그대로 둔다
+      const ok = await playCommand(makeCommand(), token);
+      if (ok === null || !alive()) return;
+      if (ok && Math.floor(G.clears / LEVEL_CLEARS) > G.level) {
+        G.level++;
+        BW.sound.levelUp();
+        toast(`레벨 ${G.level + 1}`, 1600);
+        hud();
       }
-      const exp = Object.assign({}, G.base);
-      for (const p of cmd.parts) exp[p.key] = p.dir;
-      G.expected = exp;
-      G.graceTotal = graceMs(cmd);
-      G.deadline = performance.now() + G.graceTotal;
-      G.phase = 'waiting';
-      await new Promise((r) => { G.resolve = r; });
-      if (!alive()) return;
       G.phase = 'gap';
       G.cmd = null;
       G.expected = null;
@@ -427,85 +595,123 @@ window.BW = window.BW || {};
     }
   }
 
-  async function stageUp() {
-    G.stage++;
-    G.stageClears = 0;
-    const def = STAGES[G.stage];
-    if (def) {
-      const add = (def.add || []).filter((k) => !G.unlocked.has(k));
-      add.forEach((k) => G.unlocked.add(k));
-      G.flagOrder = FLAG_KEYS.filter((k) => G.unlocked.has(k));
-      if (def.pos) G.posOn = true;
-      ensureObjects();
-      reshuffle(); // 새 물건도 아무 자리에나 끼운다
-      rebase();
+  async function runTutorial(token) {
+    const alive = () => token === G.token && G.alive;
+    const L = LESSONS[G.lesson];
+    G.phase = 'intro';
+    await sleep(400);
+    if (!alive()) return;
+    if (G.stepIdx === 0) await announce(`${G.lesson + 1}단계, ${L.say}`);
+    while (alive() && G.stepIdx < L.steps.length) {
+      const type = L.steps[G.stepIdx];
+      hud();
+      if (type === 'shuffle') {
+        guide(HOW.shuffle);
+        G.phase = 'intro';
+        setRoster(L.roster);
+        BW.sound.shuffle();
+        await sleep(2600);
+        if (!alive()) return;
+        G.stepIdx++;
+        continue;
+      }
+      const cmd = tutorialCommand(type);
+      guide(cmd.how);
+      const ok = await playCommand(cmd, token);
+      if (ok === null || !alive()) return;
+      G.stepIdx++;
+      G.phase = 'gap';
+      G.cmd = null;
+      G.expected = null;
+      await sleep(gapMs());
     }
-    saveStats(false);
-    hud();
-    BW.sound.levelUp();
-    await announce(def ? def.say : '속도 업!', def && def.hint);
+    if (alive()) lessonDone();
   }
 
-  // 물건 자리를 섞는다: 여러 번 섞어 본 것 중 자리를 옮긴 물건이 가장 많은 순서 (4분의 3 이상을 노린다)
-  // 몸체는 새 자리로 미끄러져 간다
-  function reshuffle() {
-    const keys = Object.keys(bodies);
-    const before = G.slots.filter((k) => bodies[k]);
-    const moved = (o) => o.filter((k, i) => before[i] !== k).length;
-    let next = shuffle(keys.slice());
-    for (let t = 0; t < 24 && moved(next) < Math.max(2, Math.ceil(keys.length * 0.75)); t++) {
-      const cand = shuffle(keys.slice());
-      if (moved(cand) > moved(next)) next = cand;
-    }
-    G.slots = next;
-    G.sinceShuffle = 0;
-    fit();
-    BW.sound.shuffle();
-    // 자리가 바뀌는 걸 볼 수 있게 전기는 저절로 켜진다 (그 상태가 새 기준)
-    if (bodies.elec && !G.elecOn) {
-      setElec(true);
-      setBase('elec', 'up');
-    }
+  function lessonDone() {
+    G.phase = 'done';
+    guide(null);
+    BW.store.markLesson(G.lesson);
+    BW.sound.levelUp();
+    const last = G.lesson === LESSONS.length - 1;
+    const doneCount = BW.store.lessons().length;
+    showPanel({
+      title: `${G.lesson + 1}단계 완료`,
+      big: LESSONS[G.lesson].name,
+      badge: `튜토리얼 ${doneCount}/${LESSONS.length}`,
+      note: last ? '이제 도전!' : `다음: ${G.lesson + 2}단계 · ${LESSONS[G.lesson + 1].name}`,
+      primary: last ? ['도전 시작', () => start('challenge')] : ['다음 단계', () => start('tutorial', G.lesson + 1)],
+    });
   }
 
   // ── 판정 ──
   function judgeTick(now) {
     if (G.phase !== 'waiting') return;
-    const left = G.deadline - now;
-    setTimer(left / G.graceTotal);
+    const cmd = G.cmd;
+    if (cmd.task === 'cook') {
+      if (G.taskDone) return finish(true, 0);
+      guide(G.meat.loc === 'plate' && !G.meat.held ? HOW.cookAgain : HOW.cook);
+      return;
+    }
     const st = stateOf(false);
     const wrong = Object.keys(G.expected).filter((k) => st[k] !== G.expected[k]);
+    if (tutorial()) {
+      // 명령에 없는 물건을 건드렸으면 빨갛게, 한참 그대로면 해야 할 물건을 초록으로 알려 준다
+      const targets = new Set(cmd.parts.filter((p) => !p.neg).flatMap((p) => p.keys));
+      const stray = wrong.filter((k) => !targets.has(k) && st[k] !== 'moving');
+      for (const k in bodies) {
+        bodies[k].el.classList.toggle('is-stray', stray.includes(k));
+        bodies[k].el.classList.toggle('is-target', now - G.waitStart > 2500 && targets.has(k) && wrong.includes(k));
+      }
+      guide(stray.length ? HOW.stray : cmd.how);
+      if (wrong.length) { G.okSince = 0; return; }
+      if (cmd.hold) { // 가만히 있어야 하는 명령은 잠깐 지켜본다
+        if (!G.okSince) G.okSince = now;
+        if (now - G.okSince < 1300) return;
+      }
+      return finish(true, 0);
+    }
+    const left = G.deadline - now;
+    setTimer(left / G.graceTotal);
     if (!wrong.length) finish(true, left);
     else if (left <= 0) finish(false, 0, wrong);
   }
   function finish(ok, left, wrong) {
     G.phase = 'judged';
+    G.okSince = 0;
     setTimer(null);
-    if (ok) {
+    for (const k in bodies) bodies[k].el.classList.remove('is-stray', 'is-target');
+    if (tutorial()) {
+      BW.sound.ok();
+      mark(true, '');
+    } else if (ok) {
       G.streak++;
-      G.stageClears++;
+      G.clears++;
       const pts = Math.round((100 + 60 * clamp(left / G.graceTotal, 0, 1)) * (1 + 0.1 * Math.min(G.streak - 1, 10)));
       addScore(pts);
       BW.sound.ok();
       mark(true, G.streak >= 3 ? `+${pts} · ${G.streak}연속` : `+${pts}`);
     } else {
       const exp = G.expected;
-      loseLife('정답: ' + wrong.map((k) => `${NAMES[k]} ${verb(exp[k], true)}`).join(' · '), wrong);
+      loseLife('정답: ' + wrong.map((k) => `${labelOf(k)} ${verb(exp[k], true)}`).join(' · '), wrong);
     }
     rebase();
     if (G.phase === 'judged' && G.resolve) G.resolve(ok);
   }
+  // 도전에서만 목숨이 준다. 튜토리얼은 알려 주기만
   function loseLife(msg, keys) {
     if (G.phase === 'over') return;
-    G.lives--;
-    G.streak = 0;
-    hud();
     BW.sound.bad();
     mark(false, msg);
     flashWrong(keys);
+    if (tutorial()) return;
+    G.lives--;
+    G.streak = 0;
+    hud();
     if (G.lives <= 0) gameOver();
   }
   function addScore(n) {
+    if (tutorial()) return;
     G.score += n;
     el.score.textContent = G.score;
     el.best.textContent = Math.max(G.best, G.score);
@@ -519,33 +725,42 @@ window.BW = window.BW || {};
     BW.caption.hide();
     setTimer(null);
     const { s, isBest } = saveStats(true);
-    const reached = STAGES[G.stage] ? `${G.stage + 1}단계 · ${STAGES[G.stage].name}까지` : `마지막 단계 · 속도 ${speedLv()}까지`;
     setTimeout(() => {
       if (G.phase !== 'over' || !G.alive) return;
-      el.app.classList.remove('is-blackout');
-      el.wrap.classList.remove('is-drunk');
-      clearParticles();
-      el.overScore.textContent = G.score;
       const best = isBest && G.score > 0;
-      el.overBadge.textContent = best ? '최고 기록!' : `최고 ${s.best}`;
-      el.overBadge.dataset.status = best ? 'solved' : '';
-      el.overStage.textContent = reached;
-      el.over.hidden = false;
+      showPanel({
+        title: '게임 끝',
+        big: String(G.score),
+        badge: best ? '최고 기록!' : `최고 ${s.best}`,
+        solved: best,
+        note: `레벨 ${G.level + 1}`,
+        primary: ['다시 하기', () => start('challenge')],
+      });
     }, 1100);
+  }
+  function showPanel(o) {
+    el.app.classList.remove('is-blackout');
+    el.wrap.classList.remove('is-drunk');
+    clearParticles();
+    el.overTitle.textContent = o.title;
+    el.overScore.textContent = o.big;
+    el.overBadge.textContent = o.badge;
+    el.overBadge.dataset.status = o.solved ? 'solved' : '';
+    el.overStage.textContent = o.note;
+    el.again.textContent = o.primary[0];
+    G.primary = o.primary[1];
+    el.over.hidden = false;
   }
 
   function pause() {
-    if (!G.alive || G.phase === 'paused' || G.phase === 'over' || G.phase === 'idle') return;
+    if (!G.alive || ['paused', 'over', 'idle', 'done'].includes(G.phase)) return;
     G.token++;
-    const was = G.phase;
     G.phase = 'paused';
     cancelDrag();
     BW.speech.stop();
     BW.caption.hide();
     setTimer(null);
-    // 진행 중이던 명령은 버린다. 그사이 바꾼 것도 그대로 인정
-    if (was === 'speaking' || was === 'waiting') rebase();
-    G.cmd = null;
+    G.cmd = null; // 진행 중이던 명령은 버린다 (튜토리얼은 같은 연습을 다시)
     G.expected = null;
     el.pause.hidden = false;
     el.vapor.hidden = true;
@@ -556,7 +771,8 @@ window.BW = window.BW || {};
     el.vapor.hidden = false;
     G.phase = 'gap';
     G.last = performance.now();
-    runLoop(++G.token, { say: '다시, 시작!' });
+    if (tutorial()) runTutorial(++G.token);
+    else runChallenge(++G.token, '다시, 시작!');
   }
 
   // ── 조작 ──
@@ -615,6 +831,7 @@ window.BW = window.BW || {};
     if (!d || d.id !== e.pointerId) return;
     G.drag = null;
     if (d.what === 'meat') {
+      if (!bodies.meat) return;
       if (!d.moved) { if (G.meat.loc === 'grill' && playable()) flipMeat(); return; }
       dropMeat(toStage(e), e.type === 'pointercancel');
     } else {
@@ -632,12 +849,13 @@ window.BW = window.BW || {};
 
   function toggleFlag(k) {
     const f = G.flags[k];
+    if (!f) return;
     f.target = f.target === 0 ? 180 : 0; // 돌아가는 중에 누르면 되돌아간다
     BW.sound.flag();
   }
   function setElec(on) {
     G.elecOn = on;
-    bodies.elec.el.classList.toggle('is-off', !on);
+    if (bodies.elec) bodies.elec.el.classList.toggle('is-off', !on);
     el.app.classList.toggle('is-blackout', !on);
   }
   function toggleElec() {
@@ -678,12 +896,12 @@ window.BW = window.BW || {};
     const commanded = cmdHas('meat', 'down');
     resetMeat();
     if (commanded) return; // 내려 명령: 굽기 상관없이 접시로 → 판정에서 성공
-    // 명령 없이 내렸다: 양면이 다 익었으면 보너스, 아니면 실패
+    // 명령 없이 내렸다: 양면이 다 익었으면 보너스(튜토리얼은 연습 성공), 아니면 실패
     setBase('meat', 'down');
     if (cooked) {
-      addScore(300);
       BW.sound.bonus();
-      mark(true, '+300');
+      if (G.cmd && G.cmd.task === 'cook') G.taskDone = true;
+      else if (!tutorial()) { addScore(300); mark(true, '+300'); }
     } else {
       loseLife('고기 덜 익음', ['meat']);
     }
@@ -752,7 +970,7 @@ window.BW = window.BW || {};
     if (!G.alive) { G.raf = 0; return; }
     const dt = Math.min(50, now - G.last);
     G.last = now;
-    const live = G.phase !== 'paused' && G.phase !== 'over';
+    const live = !['paused', 'over', 'done'].includes(G.phase);
     if (live) {
       updateFlags(dt);
       updateMeat(dt);
@@ -769,7 +987,7 @@ window.BW = window.BW || {};
   }
 
   function updateFlags(dt) {
-    for (const k of G.flagOrder) {
+    for (const k in G.flags) {
       const f = G.flags[k];
       if (f.angle === f.target) continue;
       const step = ROT_SPEED * dt;
@@ -882,7 +1100,7 @@ window.BW = window.BW || {};
       const b = bodies[k];
       b.el.style.transform = `translate(${b.x.toFixed(1)}px, ${b.y.toFixed(1)}px)`;
     }
-    for (const k of G.flagOrder) {
+    for (const k in G.flags) {
       const f = G.flags[k];
       if (f.drawn === f.angle) continue;
       bodies[k].pole.setAttribute('transform', `rotate(${f.angle.toFixed(1)} ${PIVOT.x} ${PIVOT.y})`);
@@ -957,7 +1175,7 @@ window.BW = window.BW || {};
     }
   }
 
-  // ── 수증기 (화면 전체를 덮는다, 부드럽게 아무 데로나 흘러가다 사라진다) ──
+  // ── 수증기 (화면 전체를 덮는다) ──
   // 작은 구름 조각을 많이: 처음엔 빠르게 사방으로 퍼지고, 점점 느려지며 둥실 떠 있다 사라진다
   const PUFF = 120; // .puff 크기(px)
   function spawnVapor() {
@@ -1005,10 +1223,14 @@ window.BW = window.BW || {};
 
   // ── 화면 표시 ──
   function hud() {
+    if (tutorial()) {
+      const L = LESSONS[G.lesson];
+      el.badge.textContent = `튜토리얼 ${G.lesson + 1} · ${L.name} · ${Math.min(G.stepIdx + 1, L.steps.length)}/${L.steps.length}`;
+      return;
+    }
     el.score.textContent = G.score;
     el.best.textContent = Math.max(G.best, G.score);
-    const def = STAGES[G.stage];
-    el.badge.textContent = def ? `${G.stage + 1}단계 · ${def.name}` : `속도 ${speedLv()}`;
+    el.badge.textContent = `도전 · 레벨 ${G.level + 1}`;
     el.lives.innerHTML = Array.from({ length: LIVES }, (_, i) => `<span class="${i < G.lives ? '' : 'is-lost'}">♥</span>`).join('');
   }
   function setTimer(f) {
@@ -1022,15 +1244,26 @@ window.BW = window.BW || {};
   function mark(ok, text) {
     el.markIcon.textContent = ok ? '✓' : '✗';
     el.markText.textContent = text || '';
-    el.mark.className = 'mark';
+    el.mark.className = 'mark' + (text ? '' : ' is-icon');
     void el.mark.offsetWidth;
-    el.mark.className = 'mark ' + (ok ? 'is-ok' : 'is-bad');
+    el.mark.classList.add(ok ? 'is-ok' : 'is-bad');
   }
   function toast(text, ms) {
+    el.toast.classList.remove('is-guide');
     el.toast.textContent = text;
     el.toast.classList.add('is-on');
     clearTimeout(G.toastT);
     G.toastT = setTimeout(() => el.toast.classList.remove('is-on'), ms);
+  }
+  // 튜토리얼 방법 안내: 연습이 끝날 때까지 떠 있다
+  function guide(text) {
+    if (!el) return;
+    clearTimeout(G.toastT);
+    if (!text) { el.toast.classList.remove('is-on', 'is-guide'); G.guideText = null; return; }
+    if (G.guideText === text) return;
+    G.guideText = text;
+    el.toast.textContent = text;
+    el.toast.classList.add('is-on', 'is-guide');
   }
   function flashWrong(keys) {
     for (const k of keys) {
@@ -1043,5 +1276,10 @@ window.BW = window.BW || {};
     }
   }
 
-  BW.game = { start, stop, pause, resume, get running() { return G.alive; }, debug: () => ({ G, bodies }) };
+  BW.game = {
+    start, stop, pause, resume,
+    primary: () => G.primary && G.primary(),
+    get running() { return G.alive; },
+    debug: () => ({ G, bodies, setRoster }),
+  };
 })(window.BW);
