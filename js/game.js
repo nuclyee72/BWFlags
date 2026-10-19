@@ -9,7 +9,7 @@ window.BW = window.BW || {};
 
   const LIVES = 3;
   const STAGE_CLEARS = 6;          // 이만큼 맞히면 다음 단계
-  const SHUFFLE_EVERY = 4;         // 이만큼 명령하면 물건 자리를 섞는다
+  const SHUFFLE_EVERY = 3;         // 이만큼 명령하면 물건 자리를 섞는다
   const COOK_SEC = 5;              // 한 면이 이만큼 구워지면 익고(1.0) 두 배면 탄다(2.0)
   const ROT_SPEED = 180 / 260;     // 깃발 막대 회전 속도 (도/ms) — 반 바퀴 0.26초
   const FLIP_MS = 240;
@@ -24,7 +24,7 @@ window.BW = window.BW || {};
 
   const STAGES = [
     { name: '청기 · 백기', add: ['blue', 'white'], say: '청기 백기, 시작!' },
-    { name: '적기 · 흑기', add: ['red', 'black'], say: '적기, 흑기 등장!', hint: '명령 4번마다 자리 섞기' },
+    { name: '적기 · 흑기', add: ['red', 'black'], say: '적기, 흑기 등장!', hint: '명령 3번마다 자리 섞기' },
     { name: '위치 명령', pos: true, say: '이제 위치로도 불러요!', hint: '양쪽에서 네 번째까지' },
     { name: '전기', add: ['elec'], say: '전기 등장!' },
     { name: '습기', add: ['humid'], say: '습기 등장!' },
@@ -288,9 +288,9 @@ window.BW = window.BW || {};
     for (const x of list) if ((t -= x.w) <= 0) return x;
     return list[list.length - 1];
   }
-  // 고른 물건을 이름이나 위치로 부른다. 위치는 어느 쪽에서든 네 번째까지만
+  // 고른 물건을 이름(대부분)이나 위치로 부른다. 위치는 어느 쪽에서든 네 번째까지만
   function describe(key) {
-    if (G.posOn && rand() < 0.4) {
+    if (G.posOn && rand() < 0.22) {
       const o = byX(), i = o.indexOf(key);
       const sides = [];
       if (i + 1 <= 4) sides.push(['left', i + 1]);
@@ -316,26 +316,29 @@ window.BW = window.BW || {};
     const say = (p, i) => (p.neg ? `${p.dir === 'up' ? '내리지' : '올리지'} 말고` : verb(p.dir, i === last));
     return { parts, text: parts.map((p, i) => `${p.noun} ${say(p, i)}`).join(' ') };
   }
+  // 명령 한 줄 = ("A 올리지 말고") + 할 일 1~3개, 모두 합쳐 3개까지
+  //  · 말고: 적기·흑기 단계부터  · 두 개짜리: 위치 명령 단계부터  · 세 개짜리: 전기 단계부터
+  //  · 고기 · 취기는 할 일이 하나일 때만
   function genOnce() {
-    // 적기·흑기 단계부터 "청기 올리지 말고 백기 내려"
-    const pn = G.stage >= 1 ? Math.min(0.3, 0.16 + 0.025 * (G.stage - 1)) : 0;
-    if (rand() < pn) {
-      const a = makeNegPart();
-      for (let t = 0; t < 8; t++) {
-        const b = makePart(true);
-        if (b.key !== a.key) return compose([a, b]);
+    const s = G.stage;
+    const p3 = s >= 3 ? Math.min(0.28, 0.12 + 0.03 * (s - 3)) : 0;
+    const p2 = s >= 2 ? Math.min(0.4, 0.22 + 0.03 * (s - 2)) : 0;
+    const pn = s >= 1 ? Math.min(0.42, 0.26 + 0.03 * (s - 1)) : 0;
+    const r = rand();
+    let n = r < p3 ? 3 : r < p3 + p2 ? 2 : 1;
+    const neg = rand() < pn;
+    if (neg && n === 3) n = 2;
+    const parts = [];
+    const add = (make) => {
+      for (let t = 0; t < 10; t++) {
+        const p = make();
+        if (!parts.some((q) => q.key === p.key)) { parts.push(p); return; }
       }
-    }
-    // 위치 명령 단계부터는 "청기 올리고 전기 내려" 같은 두 개짜리도 나온다 (고기 · 취기는 혼자만)
-    const pc = G.stage >= 2 ? Math.min(0.42, 0.2 + 0.03 * (G.stage - 2)) : 0;
-    if (rand() < pc) {
-      const a = makePart(false);
-      for (let t = 0; t < 8; t++) {
-        const b = makePart(false);
-        if (b.key !== a.key) return compose([a, b]);
-      }
-    }
-    return compose([makePart(true)]);
+    };
+    if (neg) add(makeNegPart);
+    for (let i = 0; i < n; i++) add(() => makePart(n === 1));
+    if (!parts.some((p) => !p.neg)) return compose([makePart(true)]);
+    return compose(parts);
   }
   function makeCommand() {
     let c = genOnce();
@@ -356,9 +359,10 @@ window.BW = window.BW || {};
       const kind = kindOf(p.key);
       return GRACE[kind === 'drunk' ? 'drunk' + p.dir : kind] + (p.kind === 'pos' ? POS_EXTRA : 0);
     });
+    // 할 일마다 시간을 그대로 더한다 → 명령이 길수록 시간이 늘어난다
     const sum = each.reduce((a, b) => a + b, 0);
     const negExtra = 350 * (cmd.parts.length - act.length); // "~하지 말고"를 알아듣는 시간
-    return ((act.length > 1 ? sum * 0.8 : sum) + negExtra) * graceFactor();
+    return (sum + negExtra) * graceFactor();
   }
 
   // ── 진행 ──
@@ -442,12 +446,17 @@ window.BW = window.BW || {};
     await announce(def ? def.say : '속도 업!', def && def.hint);
   }
 
-  // 물건 자리를 섞는다 (지금 순서와는 꼭 다르게). 몸체는 새 자리로 미끄러져 간다
+  // 물건 자리를 섞는다: 여러 번 섞어 본 것 중 자리를 옮긴 물건이 가장 많은 순서 (4분의 3 이상을 노린다)
+  // 몸체는 새 자리로 미끄러져 간다
   function reshuffle() {
     const keys = Object.keys(bodies);
-    const before = G.slots.filter((k) => bodies[k]).join();
+    const before = G.slots.filter((k) => bodies[k]);
+    const moved = (o) => o.filter((k, i) => before[i] !== k).length;
     let next = shuffle(keys.slice());
-    for (let t = 0; t < 6 && next.join() === before; t++) next = shuffle(keys.slice());
+    for (let t = 0; t < 24 && moved(next) < Math.max(2, Math.ceil(keys.length * 0.75)); t++) {
+      const cand = shuffle(keys.slice());
+      if (moved(cand) > moved(next)) next = cand;
+    }
     G.slots = next;
     G.sinceShuffle = 0;
     fit();
@@ -952,7 +961,7 @@ window.BW = window.BW || {};
   // 작은 구름 조각을 많이: 처음엔 빠르게 사방으로 퍼지고, 점점 느려지며 둥실 떠 있다 사라진다
   const PUFF = 120; // .puff 크기(px)
   function spawnVapor() {
-    if (G.vapor.length >= 130) G.vapor.shift().el.remove();
+    if (G.vapor.length >= 170) G.vapor.shift().el.remove();
     const b = bodies.humid;
     const q = G.matrix.transformPoint(new DOMPoint(b.x + 45, b.y + 18));
     const e = document.createElement('div');
@@ -962,12 +971,12 @@ window.BW = window.BW || {};
     G.vapor.push({
       el: e, x: q.x + G.wrapOff.x + (rand() - 0.5) * 16, y: q.y + G.wrapOff.y,
       th: -Math.PI / 2 + (rand() - 0.5) * Math.PI * 1.7, sp0: sp, sp,
-      age: 0, life: 6500 + rand() * 4500, s1: 0.55 + rand() * 0.7, ax: 1 + rand() * 0.6, op: 0.32 + rand() * 0.3,
+      age: 0, life: 7000 + rand() * 4500, s1: 0.7 + rand() * 0.8, ax: 1 + rand() * 0.6, op: 0.38 + rand() * 0.3,
     });
   }
   function updateVapor(dt) {
     if (G.humidOn && bodies.humid) {
-      G.vaporAcc += dt * 0.011;
+      G.vaporAcc += dt * 0.014;
       while (G.vaporAcc >= 1) { G.vaporAcc--; spawnVapor(); }
     }
     for (let i = G.vapor.length - 1; i >= 0; i--) {
