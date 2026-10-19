@@ -499,6 +499,21 @@ body { font-family: 'Pretendard Variable', Pretendard, 'Inter', system-ui, sans-
 .help-pop ul { margin: 8px 0 0; padding-left: 18px; font-size: 12px; line-height: 1.6; color: rgba(var(--text-given-rgb), 0.7); word-break: keep-all; }
 .help-pop li + li { margin-top: 3px; }
 
+/* ── 폰을 세로로 들고 있으면 게임 화면을 90° 돌려 가로로 보여 준다 ──
+   (웹페이지는 화면 방향을 직접 바꿀 수 없어서. 폰을 옆으로 눕히면 바로 가로로 보인다) */
+@media (orientation: portrait) and (pointer: coarse) {
+  .slide.app-slide.is-game {
+    inset: auto;
+    top: 0;
+    left: 0;
+    width: 100vh;
+    width: 100dvh;
+    height: 100vw;
+    transform-origin: 0 0;
+    transform: translateX(100vw) rotate(90deg);
+  }
+}
+
 /* ── 좁은 화면 ── */
 @media (max-width: 560px) {
   .game-head { gap: 10px; }

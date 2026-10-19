@@ -84,6 +84,7 @@ window.BW = window.BW || {};
   const mix = (a, b, t) => `rgb(${a.map((v, i) => Math.round(v + (b[i] - v) * t)).join(',')})`;
   const meatColor = (c) => (c <= 1 ? mix(RAW, DONE, c) : mix(DONE, BURNT, Math.pow(clamp(c - 1, 0, 1), 1.6)));
 
+  const ROTATE_MQ = window.matchMedia('(orientation: portrait) and (pointer: coarse)'); // game.css와 같은 조건
   const G = { alive: false, token: 0, phase: 'idle', raf: 0 };
   let bodies = {};   // 키 → 몸체 { el, x, y, w, h, hx, hy(제자리), vx, vy, fixed }
   let el = null;
@@ -280,10 +281,16 @@ window.BW = window.BW || {};
     rebase();
   }
 
-  // 도전: 6~7개. 특수 물건 2~4개 + 나머지는 깃발(같은 색은 2개까지)
+  // 도전: 6~7개. 특수 물건 2~4개(고기 · 취기가 더 잘 뽑힌다) + 나머지는 깃발(같은 색은 2개까지)
+  const SPECIAL_PICK = { elec: 1, humid: 1, meat: 2, drunk: 2 };
   function randomRoster() {
     const n = rand() < 0.5 ? MAX_OBJECTS - 1 : MAX_OBJECTS;
-    const specials = shuffle(SPECIAL.slice()).slice(0, 2 + Math.floor(rand() * 3));
+    const specials = [];
+    const want = 2 + Math.floor(rand() * 3);
+    while (specials.length < want) {
+      const k = weighted(SPECIAL.filter((s) => !specials.includes(s)).map((s) => ({ k: s, w: SPECIAL_PICK[s] }))).k;
+      specials.push(k);
+    }
     const flags = [];
     while (flags.length < n - specials.length) {
       const c = pick(COLORS);
@@ -313,9 +320,10 @@ window.BW = window.BW || {};
       b.hy = y0;
       if (!b.placed) { b.x = b.hx; b.y = b.hy; b.placed = true; }
     });
-    const wr = el.wrap.getBoundingClientRect(), vr = el.vapor.getBoundingClientRect();
-    G.wrapOff = { x: wr.left - vr.left, y: wr.top - vr.top };
-    G.vw = vr.width; G.vh = vr.height;
+    // 수증기 층(카드 전체)에서 본 판의 위치 — 화면이 돌아가 있어도 맞도록 레이아웃 좌표로 잰다
+    G.wrapOff = { x: el.wrap.offsetLeft, y: el.wrap.offsetTop };
+    G.vw = el.vapor.clientWidth; G.vh = el.vapor.clientHeight;
+    G.rotated = ROTATE_MQ.matches; // 세로 폰에서 게임 화면을 90° 돌렸는지
     updateView(0);
   }
 
@@ -415,8 +423,8 @@ window.BW = window.BW || {};
     const b = G.base, s = G.since;
     if (bodies.elec) list.push({ k: 'elec', w: b.elec === 'up' ? 1.3 : 1.5 + 0.6 * s.elec });
     if (bodies.humid) list.push({ k: 'humid', w: b.humid === 'up' ? 1.5 + 0.6 * s.humid : 1.3 });
-    if (withHeavy && bodies.meat) list.push({ k: 'meat', w: b.meat === 'up' ? (s.meat >= 2 ? 0.5 + 0.25 * s.meat : 0.1) : 1.6 });
-    if (withHeavy && bodies.drunk) list.push({ k: 'drunk', w: b.drunk === 'up' ? 0.5 + 0.5 * s.drunk : 1.2 });
+    if (withHeavy && bodies.meat) list.push({ k: 'meat', w: b.meat === 'up' ? (s.meat >= 2 ? 1 + 0.4 * s.meat : 0.3) : 3 });
+    if (withHeavy && bodies.drunk) list.push({ k: 'drunk', w: b.drunk === 'up' ? 1 + 0.6 * s.drunk : 2.6 });
     return list;
   }
   // 어느 쪽으로: 대개는 지금과 반대, 가끔은 이미 그런 상태 (가만히 있어야 하는 명령)
@@ -445,7 +453,7 @@ window.BW = window.BW || {};
     const key = weighted(keyWeights(true)).k;
     return makePartFrom(refFor(key, false), G.base[key], { neg: true });
   }
-  // 명령 한 줄 = ("A 올리지 말고") + 할 일 1~3개, 모두 합쳐 3개까지. 고기 · 취기는 할 일이 하나일 때만
+  // 명령 한 줄 = ("A 올리지 말고") + 할 일 1~3개, 모두 합쳐 3개까지. 고기 · 취기는 한 명령에 하나만
   function genOnce() {
     const lv = G.level;
     const p3 = Math.min(0.28, 0.12 + 0.02 * lv);
@@ -463,7 +471,8 @@ window.BW = window.BW || {};
       }
     };
     if (neg) add(makeNegPart);
-    for (let i = 0; i < n; i++) add(() => makePart(n === 1));
+    const heavyUsed = () => parts.some((p) => !p.neg && (p.kind === 'meat' || p.kind === 'drunk'));
+    for (let i = 0; i < n; i++) add(() => makePart(!heavyUsed()));
     if (!parts.some((p) => !p.neg)) return compose([makePart(true)]);
     return compose(parts);
   }
@@ -776,9 +785,11 @@ window.BW = window.BW || {};
   }
 
   // ── 조작 ──
+  // 화면 좌표 → 판 안 좌표 → 무대 좌표. 90° 돌린 화면이면 판의 x축이 화면 아래, y축이 화면 왼쪽을 향한다
   function toStage(e) {
     const r = el.wrap.getBoundingClientRect();
-    const p = G.inv.transformPoint(new DOMPoint(e.clientX - r.left, e.clientY - r.top));
+    const local = G.rotated ? new DOMPoint(e.clientY - r.top, r.right - e.clientX) : new DOMPoint(e.clientX - r.left, e.clientY - r.top);
+    const p = G.inv.transformPoint(local);
     return { x: p.x, y: p.y };
   }
 
